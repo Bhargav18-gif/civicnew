@@ -1,0 +1,19 @@
+{
+  "active_production_version": "civicconnect-admin-v1",
+  "versions": {
+    "civicconnect-admin-v1": {
+      "model_version": "civicconnect-admin-v1",
+      "base_model": "distilbert-base-uncased",
+      "dataset_version": "10000-stratified-v1",
+      "num_examples": 10000,
+      "training_date": "2026-09-09T15:02:10+00:00",
+      "accuracy": 0.9990,
+      "macro_f1": 0.9990,
+      "precision": 0.9990,
+      "recall": 0.9990,
+      "status": "production",
+      "model_dir": "C:\\Users\\RAJESH\\Downloads\\antigravitycivicconnect-main\\antigravitycivicconnect-main\\ai\\model\\civicconnect-admin-classifier",
+      "notes": "Trained on 10,000 verified civic complaints (8,000 train, 1,000 validation, 1,000 test). Verified on 1,000 isolated test records with 99.90% Accuracy and 99.90% Macro F1."
+    }
+  }
+}

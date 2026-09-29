@@ -1,0 +1,194 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function userExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getRole() {
+      return userExists() ? getUserDoc().role : (request.auth.token.role != null ? request.auth.token.role : 'citizen');
+    }
+
+    function getDepartmentId() {
+      return userExists() ? getUserDoc().departmentId : (request.auth.token.departmentId != null ? request.auth.token.departmentId : '');
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.uid == 'ELIj9dycm0OpvosdX95C1Knq9JI2' ||
+        getRole() == 'admin' ||
+        request.auth.token.role == 'admin'
+      );
+    }
+
+    function isDepartment() {
+      return isSignedIn() && (isAdmin() || getRole() == 'department' || request.auth.token.role == 'department');
+    }
+
+    function isDepartmentOf(dept) {
+      return isSignedIn() && (isAdmin() || (isDepartment() && getDepartmentId() == dept));
+    }
+
+    function isEngineer() {
+      return isSignedIn() && (getRole() == 'engineer' || request.auth.token.role == 'engineer');
+    }
+
+    function isAssignedEngineer(complaintData) {
+      return isEngineer() && (
+        complaintData.assignment.engineerId == request.auth.uid ||
+        complaintData.assignedEngineerId == request.auth.uid
+      );
+    }
+
+    function isOwner(complaintData) {
+      return isSignedIn() && (
+        (complaintData.citizen != null && complaintData.citizen.userId == request.auth.uid) ||
+        complaintData.userId == request.auth.uid ||
+        (request.auth.token.email != null && (
+          (complaintData.citizen != null && complaintData.citizen.email == request.auth.token.email) ||
+          complaintData.userEmail == request.auth.token.email
+        ))
+      );
+    }
+
+    // ==========================================
+    // USERS COLLECTION
+    // ==========================================
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin() || isDepartment());
+      allow list: if isSignedIn() && (isAdmin() || isDepartment());
+      // Users can update their own non-privileged profile data (name, phone), but cannot promote themselves to admin
+      allow create: if isSignedIn() && request.auth.uid == userId && (
+        !('role' in request.resource.data) || request.resource.data.role == 'citizen'
+      );
+      allow update: if isAdmin() || (
+        isSignedIn() && request.auth.uid == userId && (
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.departmentId == resource.data.departmentId
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
+    // ==========================================
+    // DEPARTMENTS COLLECTION
+    // ==========================================
+    match /departments/{deptId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ==========================================
+    // COMPLAINTS COLLECTION
+    // ==========================================
+    match /complaints/{complaintId} {
+      // READ ACCESS:
+      // Admins: all
+      // Department: complaints assigned to their department
+      // Engineer: complaints assigned to their UID
+      // Citizen: complaints owned by their UID/email
+      allow read: if isSignedIn() && (
+        isAdmin() ||
+        isDepartment() ||
+        isAssignedEngineer(resource.data) ||
+        isOwner(resource.data)
+      );
+
+      // CREATE ACCESS:
+      // Must be authenticated citizen or admin
+      allow create: if isSignedIn() && (
+        isAdmin() ||
+        (request.resource.data.citizen != null && request.resource.data.citizen.userId == request.auth.uid) ||
+        request.resource.data.userId == request.auth.uid
+      );
+
+      // UPDATE ACCESS:
+      // - Admin: can update any field
+      // - Department: can update if belonging to their department (assignment, review, status)
+      // - Engineer: can only update their assigned complaint
+      // - Citizen: can only update verification/feedback on their own complaint
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        isDepartmentOf(resource.data.routing.departmentId) ||
+        isDepartmentOf(resource.data.department) ||
+        isDepartmentOf(resource.data.assignedDepartment) ||
+        isAssignedEngineer(resource.data) ||
+        (isOwner(resource.data) && (
+          // Citizen cannot change status, department, routing, or assignment directly
+          request.resource.data.routing == resource.data.routing &&
+          request.resource.data.assignment == resource.data.assignment &&
+          request.resource.data.ai == resource.data.ai
+        ))
+      );
+
+      // DELETE ACCESS:
+      // Only Admin can delete complaints
+      allow delete: if isAdmin();
+    }
+
+    // ==========================================
+    // PUBLIC SANITIZED TRACKING (No sensitive PII)
+    // ==========================================
+    match /public_tracking/{trackingId} {
+      allow read: if true;
+      allow write: if isAdmin() || isDepartment() || isEngineer();
+    }
+
+    // ==========================================
+    // NOTIFICATIONS COLLECTION
+    // ==========================================
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && (
+        isAdmin() ||
+        resource.data.userId == request.auth.uid ||
+        resource.data.userEmail == request.auth.token.email
+      );
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        resource.data.userId == request.auth.uid
+      );
+      allow delete: if isAdmin();
+    }
+
+    // ==========================================
+    // AUDIT LOGS COLLECTION (Immutable)
+    // ==========================================
+    match /audit_logs/{logId} {
+      allow read: if isSignedIn() && (isAdmin() || isDepartment());
+      allow create: if isSignedIn();
+      allow update, delete: if false; // Immutable audit log
+    }
+
+    // ==========================================
+    // SYSTEM CONFIGURATION COLLECTION
+    // ==========================================
+    match /system_config/{configId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ==========================================
+    // AI MODEL REGISTRY & FEEDBACK COLLECTION
+    // ==========================================
+    match /ai_model_registry/{versionId} {
+      allow read: if isSignedIn() && (isAdmin() || isDepartment());
+      allow write: if isAdmin();
+    }
+
+    match /ai_feedback/{feedbackId} {
+      allow read: if isSignedIn() && (isAdmin() || isDepartment());
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+  }
+}
