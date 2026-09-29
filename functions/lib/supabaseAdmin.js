@@ -28,7 +28,7 @@ if (typeof process.loadEnvFile === 'function') {
   }
 }
 
-const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://deewawxqogoejogtqmmi.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const isConfigured = Boolean(supabaseUrl && serviceRoleKey);
