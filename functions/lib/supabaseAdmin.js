@@ -28,19 +28,24 @@ if (typeof process.loadEnvFile === 'function') {
   }
 }
 
-const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://deewawxqogoejogtqmmi.supabase.co';
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const rawUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://deewawxqogoejogtqmmi.supabase.co';
+const rawKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_SERVICE_KEY ||
+  process.env.SUPABASE_SECRET_KEY ||
+  process.env.SUPABASE_KEY;
+
+const supabaseUrl = (rawUrl || '').trim().replace(/^['"]|['"]$/g, '');
+const serviceRoleKey = (rawKey || '').trim().replace(/^['"]|['"]$/g, '');
 
 const isConfigured = Boolean(supabaseUrl && serviceRoleKey);
 
-if (!supabaseUrl) {
-  console.warn('[SUPABASE ADMIN] SUPABASE_URL environment variable is not set.');
-}
+console.log(`[SUPABASE ADMIN] Init: isConfigured=${isConfigured}, url=${supabaseUrl}, keyPresent=${Boolean(serviceRoleKey)}, keyLen=${serviceRoleKey ? serviceRoleKey.length : 0}`);
 
 if (!serviceRoleKey) {
   console.warn(
     '[SUPABASE ADMIN] SUPABASE_SERVICE_ROLE_KEY environment variable is not set. ' +
-    'Database operations will fail until configured. This key must NEVER appear in frontend code or VITE_* variables.'
+    'Database operations will fail until configured in Render Environment settings.'
   );
 }
 

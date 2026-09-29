@@ -71,12 +71,14 @@ const apiRouter = express.Router();
 
 // Health check
 apiRouter.get(['/', '/health'], (req, res) => {
+  const { supabaseAdmin } = require('./lib/supabaseAdmin');
   res.status(200).json({
-    status:    'ok',
-    service:   'CivicConnect API',
-    database:  'Supabase PostgreSQL',
-    auth:      'Firebase Authentication',
-    timestamp: new Date().toISOString()
+    status:             'ok',
+    service:            'CivicConnect API',
+    database:           'Supabase PostgreSQL',
+    databaseConfigured: Boolean(supabaseAdmin?.isConfigured),
+    auth:               'Firebase Authentication',
+    timestamp:          new Date().toISOString()
   });
 });
 
