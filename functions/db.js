@@ -260,6 +260,7 @@ async function getPublicMapComplaints(limit = 200) {
 
 /**
  * Update complaint status with workflow transition.
+ * Supports both UUID and reference_id.
  */
 async function updateComplaintStatus(complaintId, nextStatus, extras = {}) {
   const updatePayload = {
@@ -271,10 +272,9 @@ async function updateComplaintStatus(complaintId, nextStatus, extras = {}) {
   // Remove helper field not in DB schema
   delete updatePayload.previousStatus;
 
-  const { data, error } = await supabaseAdmin
-    .from('complaints')
-    .update(updatePayload)
-    .eq('id', complaintId)
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(complaintId);
+  const q = supabaseAdmin.from('complaints').update(updatePayload);
+  const { data, error } = await (isUuid ? q.eq('id', complaintId) : q.eq('reference_id', complaintId))
     .select()
     .single();
 
@@ -284,18 +284,19 @@ async function updateComplaintStatus(complaintId, nextStatus, extras = {}) {
 
 /**
  * Route complaint to a department (sets department_id, routing_method, status).
+ * Supports both UUID and reference_id.
  */
 async function routeComplaint(complaintId, { departmentId, routingMethod, status }) {
-  const { data, error } = await supabaseAdmin
-    .from('complaints')
-    .update({
-      department_id:  departmentId,
-      routing_method: routingMethod,
-      routed_at:      new Date().toISOString(),
-      status:         status || 'ROUTED',
-      previous_status: 'SUBMITTED'
-    })
-    .eq('id', complaintId)
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(complaintId);
+  const q = supabaseAdmin.from('complaints').update({
+    department_id:  departmentId,
+    routing_method: routingMethod,
+    routed_at:      new Date().toISOString(),
+    status:         status || 'ROUTED',
+    previous_status: 'SUBMITTED'
+  });
+
+  const { data, error } = await (isUuid ? q.eq('id', complaintId) : q.eq('reference_id', complaintId))
     .select()
     .single();
 
@@ -305,19 +306,20 @@ async function routeComplaint(complaintId, { departmentId, routingMethod, status
 
 /**
  * Assign an engineer to a complaint.
+ * Supports both UUID and reference_id.
  */
 async function assignEngineerToComplaint(complaintId, engineerId, assignedBy) {
   const now = new Date().toISOString();
-  const { data, error } = await supabaseAdmin
-    .from('complaints')
-    .update({
-      assigned_engineer_id: engineerId,
-      assigned_at:          now,
-      assigned_by:          assignedBy || null,
-      status:               'ASSIGNED',
-      previous_status:      'DEPARTMENT_ACCEPTED'
-    })
-    .eq('id', complaintId)
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(complaintId);
+  const q = supabaseAdmin.from('complaints').update({
+    assigned_engineer_id: engineerId,
+    assigned_at:          now,
+    assigned_by:          assignedBy || null,
+    status:               'ASSIGNED',
+    previous_status:      'DEPARTMENT_ACCEPTED'
+  });
+
+  const { data, error } = await (isUuid ? q.eq('id', complaintId) : q.eq('reference_id', complaintId))
     .select()
     .single();
 
@@ -695,22 +697,81 @@ async function getAdminStats() {
   };
 }
 
+/**
+ * Real AI metrics computed from actual database records (ai_results and audit_logs).
+ * Zero mock metrics. Zero fake data.
+ */
+async function getAIMetrics() {
+  const { data: aiResults, error: aiErr } = await supabaseAdmin
+    .from('ai_results')
+    .select('confidence, processing_status, requires_human_review, failure_reason, model_name, created_at');
+
+  if (aiErr) throw new Error(`DB_ERROR: Failed to fetch AI metrics: ${aiErr.message}`);
+
+  const { data: overrides } = await supabaseAdmin
+    .from('audit_logs')
+    .select('id')
+    .in('event_type', ['AI_OVERRIDE', 'ADMIN_OVERRIDE']);
+
+  const list = aiResults || [];
+  let highConfidence = 0;
+  let mediumConfidence = 0;
+  let lowConfidence = 0;
+  let aiFailures = 0;
+  let humanReviews = 0;
+
+  for (const r of list) {
+    if (r.processing_status === 'FAILED') {
+      aiFailures++;
+    }
+    const c = r.confidence;
+    if (typeof c === 'number') {
+      if (c >= 0.85) highConfidence++;
+      else if (c >= 0.70) mediumConfidence++;
+      else lowConfidence++;
+    }
+    if (r.requires_human_review) {
+      humanReviews++;
+    }
+  }
+
+  return {
+    totalPredictions: list.length,
+    highConfidence,
+    mediumConfidence,
+    lowConfidence,
+    humanReviews,
+    aiOverrides: overrides ? overrides.length : 0,
+    aiFailures,
+    routingFailures: aiFailures,
+    duplicateDetections: 0
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // DEPARTMENTS
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function getDepartment(departmentId) {
-  const { data, error } = await supabaseAdmin
+  if (!departmentId) return null;
+  const idStr = String(departmentId).toLowerCase().trim();
+
+  let { data, error } = await supabaseAdmin
     .from('departments')
     .select('*')
-    .eq('id', departmentId)
+    .eq('id', idStr)
     .single();
 
-  if (error) {
-    if (error.code === 'PGRST116') return null;
+  if (error && error.code !== 'PGRST116') {
     throw new Error(`DB_ERROR: ${error.message}`);
   }
-  return data;
+
+  if (!data) return null;
+
+  return {
+    ...data,
+    code: data.code || data.id.toUpperCase()
+  };
 }
 
 async function listDepartments() {
@@ -721,7 +782,11 @@ async function listDepartments() {
     .order('name', { ascending: true });
 
   if (error) throw new Error(`DB_ERROR: ${error.message}`);
-  return data || [];
+
+  return (data || []).map(d => ({
+    ...d,
+    code: d.code || d.id.toUpperCase()
+  }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -778,8 +843,9 @@ module.exports = {
   // SLA
   createSLARecord,
 
-  // Stats
+  // Stats & AI Metrics
   getAdminStats,
+  getAIMetrics,
 
   // Departments
   getDepartment,

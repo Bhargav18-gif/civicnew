@@ -24,11 +24,12 @@ const {
   findNearbyComplaints,
   getUserById,
   getUserByFirebaseUid,
-  upsertUser
+  upsertUser,
+  getDepartment
 } = require('./db');
 const { classifyComplaintText } = require('./ai');
 const { evaluatePriority } = require('./priority');
-const { determineRouting } = require('./routing');
+const { determineRoutingDecision, resolveCanonicalDepartment } = require('./departmentRoutingService');
 const { WORKFLOW_STATES } = require('./workflow');
 
 /**
@@ -231,59 +232,51 @@ async function submitComplaint(req, res) {
     let category = initialCategory;
     let departmentId = null;
     let priority = initialPriority;
+    let routeDecision = null;
 
     try {
       aiResult = await classifyComplaintText(description, imageUrl);
       aiProcessingStatus = 'COMPLETED';
-      category     = aiResult.category;
-      departmentId = aiResult.department;
-      priority     = aiResult.priority;
-      console.log(`[AI BACKGROUND ${requestId}] AI classification successful in ${Date.now() - aiStart}ms: dept=${departmentId} cat=${category} conf=${aiResult.confidence}`);
+      category = aiResult.category || initialCategory;
+      priority = aiResult.priority || initialPriority;
+      console.log(`[AI BACKGROUND ${requestId}] AI classification successful in ${Date.now() - aiStart}ms: deptCode=${aiResult.departmentCode} cat=${category} conf=${aiResult.confidence}`);
+
+      routeDecision = await determineRoutingDecision(aiResult, getDepartment);
+      departmentId = routeDecision.departmentId;
     } catch (aiErr) {
       console.warn(`[AI BACKGROUND ${requestId}] AI classification failed in ${Date.now() - aiStart}ms:`, aiErr.message);
       aiProcessingStatus = 'FAILED';
-      aiFailureReason = aiErr.code || aiErr.message || 'MODEL_ARTIFACT_MISSING';
+      aiFailureReason = aiErr.code || aiErr.message || 'AI_UNAVAILABLE';
+      routeDecision = {
+        status: WORKFLOW_STATES.PENDING_ADMIN_REVIEW,
+        routingMethod: 'ADMIN_MANUAL',
+        departmentId: null,
+        requiresHumanReview: true,
+        reason: `AI processing encountered an exception: ${aiFailureReason}`
+      };
     }
 
     // Refine priority with deterministic rule engine
     const refinedPriorityEval = evaluatePriority(description, priority);
     priority = refinedPriorityEval.priority;
 
-    // Determine workflow state
-    let status = WORKFLOW_STATES.SUBMITTED;
-    let routingMethod = 'ADMIN_MANUAL';
-
-    if (aiProcessingStatus === 'COMPLETED' && departmentId) {
-      try {
-        const routeDecision = await determineRouting(null, {
-          aiConfidence:  aiResult.confidence,
-          departmentId,
-          duplicateCandidate: { isDuplicate: false, duplicateScore: 0 }
-        });
-        status = routeDecision.status;
-        routingMethod = routeDecision.routingMethod;
-      } catch (routeErr) {
-        console.warn(`[AI BACKGROUND ${requestId}] Routing decision error:`, routeErr.message);
-        status = WORKFLOW_STATES.PENDING_ADMIN_REVIEW;
-      }
-    } else if (aiProcessingStatus === 'FAILED') {
-      status = WORKFLOW_STATES.AI_FAILED;
-      departmentId = null;
-    }
+    const status = routeDecision.status;
+    const routingMethod = routeDecision.routingMethod;
+    departmentId = routeDecision.departmentId;
 
     // Record AI Result in Supabase
     try {
       await createAIResult({
         complaintId:          complaint.id,
         category:             aiResult?.category || category || null,
-        departmentId:         aiResult?.department || departmentId || null,
+        departmentId:         aiResult?.departmentId || departmentId || null,
         priority:             aiResult?.priority || priority || null,
         confidence:           aiResult?.confidence ?? null,
-        modelName:            'gemini-2.5-flash',
-        modelVersion:         aiResult?.modelVersion || 'civicconnect-v2.1-flash',
+        modelName:            aiResult?.engine || 'gemini-2.5-flash',
+        modelVersion:         aiResult?.modelVersion || 'civicconnect-v2.5-flash',
         duplicateScore:       null,
-        requiresHumanReview:  aiResult?.requiresHumanReview ?? (aiProcessingStatus !== 'COMPLETED'),
-        reasoningSummary:     aiResult?.reasoningSummary || aiFailureReason || null,
+        requiresHumanReview:  routeDecision.requiresHumanReview || (status !== WORKFLOW_STATES.ROUTED),
+        reasoningSummary:     aiResult?.reason || routeDecision.reason || aiFailureReason || null,
         processingStatus:     aiProcessingStatus,
         failureReason:        aiFailureReason
       });
@@ -325,15 +318,18 @@ async function submitComplaint(req, res) {
         actorId:          null,
         actorFirebaseUid: null,
         actorRole:        'system',
-        eventType:        aiProcessingStatus === 'COMPLETED' ? 'COMPLAINT_ROUTED' : 'AI_FAILED',
+        eventType:        status === WORKFLOW_STATES.ROUTED ? 'COMPLAINT_ROUTED' : (aiProcessingStatus === 'COMPLETED' ? 'PENDING_ADMIN_REVIEW' : 'AI_FAILED'),
         oldStatus:        WORKFLOW_STATES.SUBMITTED,
         newStatus:        status,
         metadata:         {
-          referenceId: refId,
-          aiStatus:    aiProcessingStatus,
-          department:  departmentId,
+          referenceId:    refId,
+          aiStatus:       aiProcessingStatus,
+          department:     departmentId,
+          departmentCode: routeDecision.departmentCode || null,
+          confidence:     aiResult?.confidence ?? null,
           routingMethod,
-          durationMs:  Date.now() - aiStart
+          reason:         routeDecision.reason,
+          durationMs:     Date.now() - aiStart
         }
       });
     } catch (auditErr) {

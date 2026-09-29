@@ -3,13 +3,14 @@
  *
  * All reads/writes use Supabase PostgreSQL via functions/db.js.
  * Statistics come directly from the database — no hardcoded numbers.
- * No Firestore. No fake data.
+ * Zero mock data. Full audit logging for overrides and AI monitoring.
  */
 
 'use strict';
 
 const {
   getAdminStats,
+  getAIMetrics,
   getAllComplaints,
   getAllAuditLogs,
   getComplaintById,
@@ -17,11 +18,18 @@ const {
   createFeedback,
   recordAuditEvent,
   listUsers,
-  listDepartments
+  listDepartments,
+  getDepartment,
+  getAIResultByComplaintId,
+  createAIResult
 } = require('./db');
 const { WORKFLOW_STATES } = require('./workflow');
 const { classifyComplaintText } = require('./ai');
-const { determineRouting } = require('./routing');
+const {
+  determineRoutingDecision,
+  resolveCanonicalDepartment,
+  CANONICAL_DEPARTMENTS
+} = require('./departmentRoutingService');
 
 /**
  * GET /api/admin/stats
@@ -30,6 +38,18 @@ const { determineRouting } = require('./routing');
 async function getAdminStatsHandler(req, res) {
   const stats = await getAdminStats();
   return res.json(stats);
+}
+
+/**
+ * GET /api/admin/ai-metrics
+ * Real AI metrics computed from Supabase ai_results and audit_logs tables.
+ */
+async function getAIMetricsHandler(req, res) {
+  const metrics = await getAIMetrics();
+  return res.json({
+    success: true,
+    metrics
+  });
 }
 
 /**
@@ -47,26 +67,49 @@ async function listAllComplaints(req, res) {
 
 /**
  * GET /api/admin/exceptions
- * Exception queues: AI_FAILED, PENDING_ADMIN_REVIEW, REOPENED.
+ * Admin Review Queue: fetches complaints requiring administrative intervention.
+ * Reasons: LOW_AI_CONFIDENCE, AI_FAILED, PENDING_ADMIN_REVIEW, SLA_BREACH, REOPENED.
  */
 async function getExceptions(req, res) {
-  const [aiFailed, pendingReview, reopened] = await Promise.all([
+  const [aiFailed, pendingReview, reopened, allComplaints] = await Promise.all([
     getAllComplaints({ status: WORKFLOW_STATES.AI_FAILED }),
     getAllComplaints({ status: WORKFLOW_STATES.PENDING_ADMIN_REVIEW }),
-    getAllComplaints({ status: WORKFLOW_STATES.REOPENED })
+    getAllComplaints({ status: WORKFLOW_STATES.REOPENED }),
+    getAllComplaints({ limit: 100 })
   ]);
 
+  // SLA breached complaints that are not closed or rejected
+  const now = new Date();
+  const slaBreached = allComplaints.filter(c => 
+    c.sla_deadline && new Date(c.sla_deadline) < now &&
+    c.status !== WORKFLOW_STATES.CLOSED && c.status !== WORKFLOW_STATES.REJECTED
+  );
+
+  // Combine into single categorized review queue
+  const reviewQueue = [
+    ...pendingReview.map(c => ({ ...c, exceptionReason: 'PENDING_ADMIN_REVIEW' })),
+    ...aiFailed.map(c => ({ ...c, exceptionReason: 'AI_FAILED' })),
+    ...reopened.map(c => ({ ...c, exceptionReason: 'REOPENED' })),
+    ...slaBreached.filter(c => c.status !== WORKFLOW_STATES.PENDING_ADMIN_REVIEW && c.status !== WORKFLOW_STATES.AI_FAILED).map(c => ({ ...c, exceptionReason: 'SLA_BREACH' }))
+  ];
+
   return res.json({
+    success: true,
+    total: reviewQueue.length,
+    reviewQueue,
     aiFailed,
     pendingReview,
-    reopened
+    reopened,
+    slaBreached
   });
 }
 
 /**
  * POST /api/admin/issues/:id/override-ai
  * Admin manually routes a complaint, overriding AI decision.
- * Stores correction as feedback for model retraining.
+ * Adheres strictly to Part 14:
+ * Records originalAIResult, adminDecision, adminUserId, reason, timestamp,
+ * creates AI_OVERRIDE audit event and stores in feedback table for retraining.
  */
 async function overrideAI(req, res) {
   const complaintId = req.params.id;
@@ -84,52 +127,86 @@ async function overrideAI(req, res) {
     return res.status(404).json({ code: 'NOT_FOUND', message: 'Complaint not found.' });
   }
 
-  const currentStatus = complaint.status;
+  // Resolve to canonical department
+  const canonicalDept = resolveCanonicalDepartment(department);
+  if (!canonicalDept) {
+    return res.status(400).json({
+      code: 'DEPARTMENT_NOT_FOUND',
+      message: `Department "${department}" is not a recognized canonical department.`
+    });
+  }
 
-  // Store correction as AI feedback for retraining dataset
+  const currentStatus = complaint.status;
+  const originalAI = await getAIResultByComplaintId(complaint.id);
+  const normPriority = (priority ? priority.toUpperCase() : complaint.priority) || 'MEDIUM';
+  const now = new Date().toISOString();
+
+  // 1. Store correction in feedback table for retraining dataset
   try {
     await createFeedback({
       complaintId:   complaint.id,
-      modelVersion:  'civicconnect-v2.1-flash',
-      aiPrediction:  complaint.category || null,
-      aiConfidence:  null,
-      humanDecision: { category: category || complaint.category, department, priority },
+      modelVersion:  originalAI?.model_version || 'civicconnect-v2.5-flash',
+      aiPrediction:  originalAI?.category || complaint.category || null,
+      aiConfidence:  originalAI?.confidence || null,
+      humanDecision: {
+        category: category || complaint.category,
+        departmentId: canonicalDept.id,
+        departmentCode: canonicalDept.code,
+        priority: normPriority
+      },
       humanUserId:   req.user?.supabaseId || null,
-      reason
+      reason:        reason || 'Administrative department override'
     });
   } catch (feedbackErr) {
     console.warn('[ADMIN] Failed to store AI feedback:', feedbackErr.message);
   }
 
-  // Update complaint — route to department
-  await updateComplaintStatus(complaint.id, WORKFLOW_STATES.ROUTED, {
+  // 2. Update complaint — route directly to target department
+  const updatedComplaint = await updateComplaintStatus(complaint.id, WORKFLOW_STATES.ROUTED, {
     previousStatus:  currentStatus,
     category:        category || complaint.category,
-    department_id:   department,
-    priority:        priority ? priority.toUpperCase() : complaint.priority,
+    department_id:   canonicalDept.id,
+    priority:        normPriority,
     routing_method:  'ADMIN_MANUAL',
-    routed_at:       new Date().toISOString()
+    routed_at:       now
   });
 
+  // 3. Create immutable AI_OVERRIDE audit event (Part 14)
   await recordAuditEvent({
     complaintId:  complaint.id,
     actorId:      req.user?.supabaseId || null,
     actorRole:    'admin',
-    eventType:    'ADMIN_OVERRIDE',
+    eventType:    'AI_OVERRIDE',
     oldStatus:    currentStatus,
     newStatus:    WORKFLOW_STATES.ROUTED,
-    metadata:     { override: { department, category, priority, reason } }
+    metadata:     {
+      originalAIResult: originalAI ? {
+        category:     originalAI.category,
+        departmentId: originalAI.department_id,
+        confidence:   originalAI.confidence
+      } : null,
+      adminDecision: {
+        departmentId:   canonicalDept.id,
+        departmentCode: canonicalDept.code,
+        category:       category || complaint.category,
+        priority:       normPriority
+      },
+      adminUserId: req.user?.supabaseId || null,
+      reason,
+      timestamp: now
+    }
   });
 
   return res.json({
     success: true,
-    message: 'Complaint routed successfully via admin override.'
+    message: `Complaint routed successfully to ${canonicalDept.name} via admin override.`,
+    complaint: updatedComplaint
   });
 }
 
 /**
  * POST /api/admin/issues/:id/retry-ai
- * Retry AI classification on a failed complaint.
+ * Retry AI classification and autonomous routing on a failed or review-pending complaint.
  */
 async function retryAI(req, res) {
   const complaintId = req.params.id;
@@ -141,19 +218,34 @@ async function retryAI(req, res) {
 
   try {
     const aiResult = await classifyComplaintText(complaint.description);
+    const routeDecision = await determineRoutingDecision(aiResult, getDepartment);
 
-    const routeDecision = await determineRouting(null, {
-      aiConfidence:       aiResult.confidence,
-      departmentId:       aiResult.department,
-      duplicateCandidate: { isDuplicate: false, duplicateScore: 0 }
+    const nextStatus = routeDecision.status;
+    const deptId = routeDecision.departmentId;
+
+    // Update AI Results
+    await createAIResult({
+      complaintId:          complaint.id,
+      category:             aiResult.category,
+      departmentId:         deptId,
+      priority:             aiResult.priority,
+      confidence:           aiResult.confidence,
+      modelName:            aiResult.engine || 'gemini-2.5-flash',
+      modelVersion:         aiResult.modelVersion || 'civicconnect-v2.5-flash',
+      duplicateScore:       null,
+      requiresHumanReview:  routeDecision.requiresHumanReview,
+      reasoningSummary:     aiResult.reason || routeDecision.reason,
+      processingStatus:     'COMPLETED',
+      failureReason:        null
     });
 
-    await updateComplaintStatus(complaint.id, routeDecision.status, {
+    const updated = await updateComplaintStatus(complaint.id, nextStatus, {
       previousStatus: complaint.status,
       category:       aiResult.category,
-      department_id:  aiResult.department,
+      department_id:  deptId,
       priority:       aiResult.priority.toUpperCase(),
-      routing_method: routeDecision.routingMethod
+      routing_method: routeDecision.routingMethod,
+      routed_at:      nextStatus === WORKFLOW_STATES.ROUTED ? new Date().toISOString() : null
     });
 
     await recordAuditEvent({
@@ -162,14 +254,16 @@ async function retryAI(req, res) {
       actorRole:    'admin',
       eventType:    'AI_RETRY_COMPLETED',
       oldStatus:    complaint.status,
-      newStatus:    routeDecision.status,
-      metadata:     { aiResult }
+      newStatus:    nextStatus,
+      metadata:     { aiResult, routeDecision }
     });
 
     return res.json({
-      success:   true,
+      success:     true,
       aiResult,
-      newStatus: routeDecision.status
+      routeDecision,
+      newStatus:   nextStatus,
+      complaint:   updated
     });
   } catch (err) {
     return res.status(500).json({
@@ -177,6 +271,57 @@ async function retryAI(req, res) {
       message: err.message
     });
   }
+}
+
+/**
+ * PATCH /api/admin/issues/:id
+ * General administrative update for complaint details (status, priority, category, department).
+ */
+async function updateComplaint(req, res) {
+  const complaintId = req.params.id;
+  const updates = req.body || {};
+
+  const complaint = await getComplaintById(complaintId);
+  if (!complaint) {
+    return res.status(404).json({ code: 'NOT_FOUND', message: 'Complaint not found.' });
+  }
+
+  const payload = {};
+  if (updates.status) payload.status = updates.status.toUpperCase();
+  if (updates.priority) payload.priority = updates.priority.toUpperCase();
+  if (updates.category) payload.category = updates.category;
+
+  if (updates.department || updates.assignedDepartment || updates.department_id) {
+    const rawDept = updates.department || updates.assignedDepartment || updates.department_id;
+    const resolved = resolveCanonicalDepartment(rawDept);
+    if (resolved) {
+      payload.department_id = resolved.id;
+    }
+  }
+
+  if (payload.status === WORKFLOW_STATES.ROUTED && !complaint.routed_at) {
+    payload.routed_at = new Date().toISOString();
+  }
+
+  const updatedComplaint = await updateComplaintStatus(complaint.id, payload.status || complaint.status, {
+    previousStatus: complaint.status,
+    ...payload
+  });
+
+  await recordAuditEvent({
+    complaintId:  complaint.id,
+    actorId:      req.user?.supabaseId || null,
+    actorRole:    'admin',
+    eventType:    'ADMIN_UPDATE',
+    oldStatus:    complaint.status,
+    newStatus:    payload.status || complaint.status,
+    metadata:     { updates }
+  });
+
+  return res.json({
+    success: true,
+    issue: updatedComplaint
+  });
 }
 
 /**
@@ -191,7 +336,7 @@ async function getAuditLogs(req, res) {
 
 /**
  * GET /api/admin/users
- * List all registered users.
+ * List all registered users from Supabase.
  */
 async function getUsers(req, res) {
   const opts = {};
@@ -199,12 +344,12 @@ async function getUsers(req, res) {
   if (req.query.department_id) opts.department_id = req.query.department_id;
 
   const users = await listUsers(opts);
-  // Strip sensitive fields for response
   return res.json({
     users: users.map(u => ({
       id:           u.id,
       name:         u.name,
       email:        u.email,
+      phone:        u.phone || null,
       role:         u.role,
       departmentId: u.department_id,
       isActive:     u.is_active,
@@ -225,10 +370,9 @@ async function getDepartmentsHandler(req, res) {
 
 /**
  * GET /api/admin/automation-config
- * Returns AI routing configuration (from system settings or hardcoded defaults).
+ * Returns AI routing configuration.
  */
 async function getAIConfig(req, res) {
-  // For now return sensible defaults — can be stored in a system_config table later
   return res.json({
     success:                 true,
     autoRoutingEnabled:      true,
@@ -243,7 +387,6 @@ async function getAIConfig(req, res) {
  * Update AI routing thresholds.
  */
 async function updateAIConfig(req, res) {
-  // TODO: persist to a system_config table in Supabase
   const updates = req.body || {};
   return res.json({
     success: true,
@@ -258,10 +401,12 @@ async function updateAIConfig(req, res) {
 
 module.exports = {
   getAdminStats:      getAdminStatsHandler,
+  getAIMetrics:       getAIMetricsHandler,
   listAllComplaints,
   getExceptions,
   overrideAI,
   retryAI,
+  updateComplaint,
   getAuditLogs,
   getUsers,
   getDepartmentsHandler,

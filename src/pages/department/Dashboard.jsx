@@ -31,10 +31,11 @@ export default function DepartmentDashboard() {
   const [verificationNotes, setVerificationNotes] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
 
-  const userDept = user?.departmentId || user?.department || "roads";
+  const userDept = user?.department_id || user?.departmentId || user?.department || "";
 
   // 1. Fetch dynamic engineers for this department
   const loadEngineers = async () => {
+    if (!userDept) return;
     try {
       const engList = await departmentApi.getDepartmentEngineers(userDept);
       setEngineers(engList);
@@ -49,6 +50,10 @@ export default function DepartmentDashboard() {
 
   // 2. Fetch department complaints from Supabase via backend API
   useEffect(() => {
+    if (!userDept) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
 
     departmentApi.getDepartmentComplaints(userDept)
@@ -63,18 +68,18 @@ export default function DepartmentDashboard() {
       .finally(() => setLoading(false));
   }, [userDept]);
 
-  // Handle engineer assignment using engineer UID
+  // Handle engineer assignment using engineer ID
   const handleAssignEngineer = async (complaint) => {
-    const engineerUid = selectedEngineers[complaint.referenceId];
-    if (!engineerUid) {
+    const engineerId = selectedEngineers[complaint.referenceId];
+    if (!engineerId) {
       toast.error("Please select an available engineer from the dropdown.");
       return;
     }
 
     setActionLoading(true);
     try {
-      await departmentApi.assignEngineer(complaint.referenceId, engineerUid);
-      const assignedEng = engineers.find((e) => e.uid === engineerUid);
+      await departmentApi.assignEngineer(complaint.referenceId, engineerId);
+      const assignedEng = engineers.find((e) => (e.id || e.uid) === engineerId);
       toast.success(`Assigned to ${assignedEng?.name || "Engineer"} successfully!`);
       loadEngineers();
     } catch (err) {
@@ -255,7 +260,7 @@ export default function DepartmentDashboard() {
                             {c.assignment?.engineerId ? (
                               <span className="text-xs text-slate-300 flex items-center gap-1.5 font-medium">
                                 <UserCheck size={14} className="text-cyan-400" />
-                                {engineers.find(e => e.uid === c.assignment.engineerId)?.name || c.assignment.engineerId}
+                                {engineers.find(e => (e.id || e.uid) === c.assignment.engineerId)?.name || c.assignment.engineerId}
                               </span>
                             ) : (
                               <select
@@ -270,11 +275,14 @@ export default function DepartmentDashboard() {
                                 disabled={!isAssignable}
                               >
                                 <option value="">Select Field Engineer</option>
-                                {engineers.map((eng) => (
-                                  <option key={eng.uid} value={eng.uid}>
-                                    {eng.name} ({eng.activeTasks} tasks)
-                                  </option>
-                                ))}
+                                {engineers.map((eng) => {
+                                  const engId = eng.id || eng.uid;
+                                  return (
+                                    <option key={engId} value={engId}>
+                                      {eng.name} ({eng.activeTasks || 0} tasks)
+                                    </option>
+                                  );
+                                })}
                               </select>
                             )}
                           </td>

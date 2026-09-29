@@ -26,11 +26,11 @@ export function calculateSlaDeadline(priority, startDate = new Date()) {
  */
 export function createCanonicalComplaint(data = {}) {
   const now = new Date().toISOString();
-  const refId = data.referenceId || data.complaintId || generateReferenceId();
+  const refId = data.referenceId || data.reference_id || data.complaintId || generateReferenceId();
 
   // Normalize citizen info
   const citizen = {
-    userId: data.citizen?.userId || data.userId || null,
+    userId: data.citizen?.userId || data.citizen_id || data.userId || null,
     name: (data.citizen?.name || data.userName || data.name || "Citizen").trim(),
     email: (data.citizen?.email || data.userEmail || data.email || "").trim()
   };
@@ -39,13 +39,13 @@ export function createCanonicalComplaint(data = {}) {
   const issue = {
     title: (data.issue?.title || data.title || data.issueTitle || "Civic Complaint").trim(),
     description: (data.issue?.description || data.description || data.issueDescription || "").trim(),
-    category: (data.issue?.category || data.category || data.department || "General").trim()
+    category: (data.issue?.category || data.category || data.department_id || data.department || "General").trim()
   };
 
   // Normalize location
   const location = {
-    lat: typeof data.location?.lat === "number" ? data.location.lat : (typeof data.lat === "number" ? data.lat : null),
-    lng: typeof data.location?.lng === "number" ? data.location.lng : (typeof data.lng === "number" ? data.lng : null),
+    lat: typeof data.location?.lat === "number" ? data.location.lat : (typeof data.latitude === "number" ? data.latitude : (typeof data.lat === "number" ? data.lat : null)),
+    lng: typeof data.location?.lng === "number" ? data.location.lng : (typeof data.longitude === "number" ? data.longitude : (typeof data.lng === "number" ? data.lng : null)),
     address: data.location?.address || data.address || "Location unavailable"
   };
 
@@ -67,7 +67,7 @@ export function createCanonicalComplaint(data = {}) {
   const priority = (data.ai?.priority || data.priority || PRIORITY_LEVELS.MEDIUM).toUpperCase();
   const ai = {
     category: data.ai?.category || data.aiCategory || issue.category,
-    department: data.ai?.department || data.assignedDepartment || issue.category,
+    department: data.ai?.department || data.department_id || data.assignedDepartment || issue.category,
     priority: PRIORITY_LEVELS[priority] ? priority : PRIORITY_LEVELS.MEDIUM,
     confidence: typeof data.ai?.confidence === "number" ? data.ai.confidence : (typeof data.aiConfidence === "number" ? data.aiConfidence : 0),
     modelVersion: data.ai?.modelVersion || data.classificationModel || "civicconnect-v2",
@@ -78,16 +78,16 @@ export function createCanonicalComplaint(data = {}) {
 
   // Normalize routing
   const routing = {
-    departmentId: data.routing?.departmentId || data.assignedDepartment || issue.category,
-    routedAt: data.routing?.routedAt || now,
-    routingMethod: data.routing?.routingMethod || "AI_AUTO"
+    departmentId: data.routing?.departmentId || data.department_id || data.assignedDepartment || data.department || issue.category,
+    routedAt: data.routing?.routedAt || data.routed_at || now,
+    routingMethod: data.routing?.routingMethod || data.routing_method || "AI_AUTO"
   };
 
   // Normalize assignment
   const assignment = {
-    engineerId: data.assignment?.engineerId || data.assignedEngineerId || null,
-    assignedAt: data.assignment?.assignedAt || (data.assignedEngineerId ? now : null),
-    assignedBy: data.assignment?.assignedBy || null
+    engineerId: data.assignment?.engineerId || data.assigned_engineer_id || data.assignedEngineerId || null,
+    assignedAt: data.assignment?.assignedAt || data.assigned_at || (data.assigned_engineer_id ? now : null),
+    assignedBy: data.assignment?.assignedBy || data.assigned_by || null
   };
 
   // Normalize workflow state
@@ -96,22 +96,22 @@ export function createCanonicalComplaint(data = {}) {
 
   const workflow = {
     status: canonicalStatus,
-    previousStatus: data.workflow?.previousStatus || null,
-    updatedAt: now
+    previousStatus: data.workflow?.previousStatus || data.previous_status || null,
+    updatedAt: data.updatedAt || data.updated_at || now
   };
 
   // Normalize verification
   const verification = {
     aiResult: data.verification?.aiResult || null,
-    departmentResult: data.verification?.departmentResult || null,
-    citizenResult: data.verification?.citizenResult || null
+    departmentResult: data.verification?.departmentResult || data.dept_verification_decision || null,
+    citizenResult: data.verification?.citizenResult || data.citizen_verification_decision || null
   };
 
   // Normalize SLA
-  const deadline = data.sla?.deadline || calculateSlaDeadline(ai.priority, new Date(now));
+  const deadline = data.sla?.deadline || data.sla_deadline || calculateSlaDeadline(ai.priority, new Date(now));
   const sla = {
     deadline,
-    breached: Boolean(data.sla?.breached ?? (new Date(now) > new Date(deadline)))
+    breached: Boolean(data.sla?.breached ?? data.sla_breached ?? (new Date(now) > new Date(deadline)))
   };
 
   // Build the complete canonical document
@@ -127,8 +127,8 @@ export function createCanonicalComplaint(data = {}) {
     workflow,
     verification,
     sla,
-    createdAt: data.createdAt || now,
-    updatedAt: now
+    createdAt: data.createdAt || data.created_at || now,
+    updatedAt: data.updatedAt || data.updated_at || now
   };
 }
 

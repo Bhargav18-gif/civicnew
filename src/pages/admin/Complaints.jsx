@@ -51,7 +51,14 @@ export default function Complaints() {
       (c.userName && c.userName.toLowerCase().includes(searchLower)) ||
       (c.category && c.category.toLowerCase().includes(searchLower));
 
-    const matchesStatus = statusFilter === "all" || c.status === statusFilter;
+    const normFilter = statusFilter.toLowerCase();
+    const cStatus = (c.status || "").toLowerCase().replace(/[\s-]/g, '_');
+    const cCanon = (c.canonicalStatus || "").toLowerCase().replace(/[\s-]/g, '_');
+    const matchesStatus = statusFilter === "all" ||
+      cStatus === normFilter ||
+      cCanon === normFilter ||
+      (normFilter === "resolved" && (cStatus === "closed" || cCanon === "closed" || cStatus === "resolved")) ||
+      (normFilter === "pending_admin_review" && (cStatus === "pending_admin_review" || cCanon === "pending_admin_review" || cStatus === "pending_review"));
     const matchesCategory = categoryFilter === "all" || c.category === categoryFilter;
     const matchesPriority = priorityFilter === "all" || c.priority === priorityFilter;
     
@@ -104,13 +111,14 @@ export default function Complaints() {
                   className="bg-slate-950 border border-white/10 rounded-xl py-3 px-3 text-xs text-white focus:outline-none focus:border-cyan-400/50 transition-colors [&>option]:bg-[#101826] cursor-pointer"
                 >
                   <option value="all">All Statuses</option>
-                  <option value="pending review">Pending Review (AI)</option>
-                  <option value="pending">Pending</option>
+                  <option value="pending_admin_review">Pending Admin Review</option>
+                  <option value="ai_failed">AI Failed</option>
+                  <option value="routed">Routed</option>
                   <option value="assigned">Assigned</option>
-                  <option value="in-progress">In Progress</option>
-                  <option value="resolved">Resolved</option>
-                  <option value="rejected">Rejected</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="resolved">Resolved / Closed</option>
                   <option value="reopened">Reopened</option>
+                  <option value="rejected">Rejected</option>
                 </select>
 
                 <select

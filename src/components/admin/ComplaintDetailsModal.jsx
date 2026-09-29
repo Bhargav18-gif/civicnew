@@ -47,7 +47,8 @@ export default function ComplaintDetailsModal({ issue, onClose, onUpdate }) {
       };
 
       // Backend API is the single source of truth — no direct Firestore writes
-      const { data } = await api.patch(`/admin/issues/${issue.referenceId}`, updatePayload);
+      const targetId = issue.id || issue.referenceId || issue.reference_id;
+      const { data } = await api.patch(`/admin/issues/${targetId}`, updatePayload);
       setSuccess(true);
       if (onUpdate && data && data.issue) {
         onUpdate(data.issue);

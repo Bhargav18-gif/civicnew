@@ -68,12 +68,14 @@ async function listDepartmentEngineers(req, res) {
   return res.json({
     engineers: engineers.map(e => ({
       id:           e.id,
+      uid:          e.id,
       name:         e.name,
       email:        e.email,
       phone:        e.phone || null,
       role:         e.role,
       departmentId: e.department_id,
-      isActive:     e.is_active
+      isActive:     e.is_active,
+      activeTasks:  0
     }))
   });
 }
@@ -109,8 +111,12 @@ async function assignEngineer(req, res) {
     });
   }
 
-  // Load engineer — must be a real Supabase user record
-  const engineer = await getUserById(engineerId);
+  // Load engineer — must be a real Supabase user record (try UUID then Firebase UID)
+  let engineer = await getUserById(engineerId);
+  if (!engineer) {
+    const { getUserByFirebaseUid } = require('./db');
+    engineer = await getUserByFirebaseUid(engineerId);
+  }
   if (!engineer) {
     return res.status(404).json({
       code: 'ASSIGNMENT_FAILED',
