@@ -31,13 +31,25 @@ async function resolveUserProfileFromSupabase(firebaseUser) {
 
   try {
     // Sync Firebase user to Supabase and retrieve profile
-    const token = await firebaseUser.getIdToken();
-    const response = await api.post('/auth/sync', {
-      name:  firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Citizen',
-      email: firebaseUser.email || ''
-    }, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    let token = await firebaseUser.getIdToken(false);
+    let response;
+    try {
+      response = await api.post('/auth/sync', {
+        name:  firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Citizen',
+        email: firebaseUser.email || ''
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+    } catch (firstErr) {
+      // If 401 or token issue, force a token refresh and retry once
+      token = await firebaseUser.getIdToken(true);
+      response = await api.post('/auth/sync', {
+        name:  firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Citizen',
+        email: firebaseUser.email || ''
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+    }
 
     const profile = response.data?.user || response.data;
     return {
@@ -49,8 +61,7 @@ async function resolveUserProfileFromSupabase(firebaseUser) {
     };
   } catch (err) {
     console.warn('[AUTH] Backend profile sync failed, defaulting to citizen role:', err.message);
-    // If backend is unreachable during development, fall back to citizen role only
-    // Do NOT try to read role from Firestore any more
+    // If backend is unreachable or unauthenticated, fall back to citizen role safely
     return { role: ROLES.CITIZEN, departmentId: null, supabaseId: null };
   }
 }

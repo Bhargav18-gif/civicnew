@@ -243,6 +243,22 @@ async function getAllComplaints(opts = {}) {
 }
 
 /**
+ * List public complaints for map view (sanitized, no PII).
+ */
+async function getPublicMapComplaints(limit = 200) {
+  const { data, error } = await supabaseAdmin
+    .from('complaints')
+    .select('id, reference_id, category, priority, status, latitude, longitude, address, created_at')
+    .not('latitude', 'is', null)
+    .not('longitude', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) throw new Error(`DB_ERROR: Failed to fetch public map complaints: ${error.message}`);
+  return data || [];
+}
+
+/**
  * Update complaint status with workflow transition.
  */
 async function updateComplaintStatus(complaintId, nextStatus, extras = {}) {
@@ -728,6 +744,7 @@ module.exports = {
   getComplaintsByDepartmentId,
   getComplaintsByEngineerId,
   getAllComplaints,
+  getPublicMapComplaints,
   updateComplaintStatus,
   routeComplaint,
   assignEngineerToComplaint,

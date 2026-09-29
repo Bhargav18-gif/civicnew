@@ -8,12 +8,13 @@
 
 'use strict';
 
-const { randomUUID } = require('crypto');
+const { randomUUID, createHash } = require('crypto');
 const {
   createComplaint,
   getComplaintById,
   getComplaintsByCitizenId,
   getAllComplaints,
+  getPublicMapComplaints,
   updateComplaintStatus,
   addComplaintMedia,
   createAIResult,
@@ -91,6 +92,29 @@ async function submitComplaint(req, res) {
     }
   }
 
+  // Support guest submission when email is provided
+  if (!citizenSupabaseId && (body.email || body.citizenEmail)) {
+    const rawEmail = (body.email || body.citizenEmail || '').toLowerCase().trim();
+    if (rawEmail) {
+      try {
+        const guestUid = `guest_${createHash('sha256').update(rawEmail).digest('hex').substring(0, 24)}`;
+        let guestUser = await getUserByFirebaseUid(guestUid);
+        if (!guestUser) {
+          guestUser = await upsertUser({
+            firebaseUid: guestUid,
+            name: body.userName || body.name || 'Citizen',
+            email: rawEmail,
+            role: 'CITIZEN'
+          });
+        }
+        citizenSupabaseId = guestUser?.id;
+        console.log(`[COMPLAINT ${requestId}] Guest citizen resolved: ${citizenSupabaseId} (${rawEmail})`);
+      } catch (guestErr) {
+        console.warn(`[COMPLAINT ${requestId}] Auto-resolve guest citizen failed:`, guestErr.message);
+      }
+    }
+  }
+
   // Test mode convenience hook
   if (process.env.NODE_ENV === 'test' && !citizenSupabaseId) {
     citizenSupabaseId = '00000000-0000-0000-0000-000000000001';
@@ -100,7 +124,7 @@ async function submitComplaint(req, res) {
     console.warn(`[COMPLAINT ${requestId}] Rejected: unauthorized (no valid citizen record)`);
     return res.status(401).json({
       code: 'UNAUTHORIZED',
-      message: 'You must be signed in with Firebase Authentication to submit a complaint.'
+      message: 'An email address or signed-in account is required to submit a complaint.'
     });
   }
 
@@ -398,9 +422,25 @@ async function listUserComplaints(req, res) {
   return res.json({ complaints });
 }
 
+/**
+ * GET /api/public/map-complaints
+ * Returns sanitized non-PII complaint coordinates and statuses for the public map view.
+ */
+async function listPublicMapComplaints(req, res) {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
+    const complaints = await getPublicMapComplaints(limit);
+    return res.json({ complaints });
+  } catch (err) {
+    console.warn('[PUBLIC MAP] Failed to fetch complaints:', err.message);
+    return res.json({ complaints: [] });
+  }
+}
+
 module.exports = {
   submitComplaint,
   getComplaintById: getComplaintByIdHandler,
   trackPublicComplaint,
-  listUserComplaints
+  listUserComplaints,
+  listPublicMapComplaints
 };

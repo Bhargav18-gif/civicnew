@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, useMapEvents, useMap, LayersControl, C
 import MarkerClusterGroup from "react-leaflet-cluster";
 import L from "leaflet";
 import * as turf from "@turf/turf";
-import { adminApi } from "../../services/api/adminApi.js";
+import api from "../../utils/api.js";
 
 // Fix Leaflet's default icon path issues in React
 delete L.Icon.Default.prototype._getIconUrl;
@@ -95,7 +95,8 @@ export default function LocationPicker({ location, setLocation }) {
   useEffect(() => {
     async function fetchComplaints() {
       try {
-        const data = await adminApi.getComplaints({ limit: 200 });
+        const res = await api.get('/public/map-complaints?limit=200');
+        const data = res.data?.complaints || res.data || [];
         const mapped = data.filter(c => c.latitude && c.longitude).map(c => ({
           ...c,
           lat: c.latitude,

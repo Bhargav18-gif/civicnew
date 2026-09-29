@@ -34,7 +34,8 @@ const {
   submitComplaint,
   getComplaintById,
   trackPublicComplaint,
-  listUserComplaints
+  listUserComplaints,
+  listPublicMapComplaints
 } = require('./complaintsHandler');
 
 const {
@@ -128,6 +129,7 @@ apiRouter.use('/ai',          aiRouter);
 apiRouter.post(['/complaints', '/submit-complaint'], submitComplaint);
 apiRouter.get('/complaints/:id', getComplaintById);
 apiRouter.get(['/public/track/:refId', '/track/:refId'], trackPublicComplaint);
+apiRouter.get('/public/map-complaints', listPublicMapComplaints);
 apiRouter.get('/user/complaints', requireAuth, listUserComplaints);
 
 // User notifications — from Supabase notifications table
