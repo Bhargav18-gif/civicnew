@@ -28,15 +28,55 @@ if (typeof process.loadEnvFile === 'function') {
   }
 }
 
-const rawUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://deewawxqogoejogtqmmi.supabase.co';
-const rawKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SUPABASE_SERVICE_KEY ||
-  process.env.SUPABASE_SECRET_KEY ||
-  process.env.SUPABASE_KEY;
+// Resolve Supabase URL
+let supabaseUrl = '';
+for (const [k, v] of Object.entries(process.env)) {
+  const normKey = k.trim().toUpperCase();
+  if (normKey.includes('SUPABASE') && (normKey.includes('URL') || normKey.includes('HOST')) && typeof v === 'string' && v.includes('supabase.co')) {
+    supabaseUrl = v.trim().replace(/^['"]|['"]$/g, '');
+    break;
+  }
+}
+if (!supabaseUrl) {
+  supabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://deewawxqogoejogtqmmi.supabase.co').trim().replace(/^['"]|['"]$/g, '');
+}
 
-const supabaseUrl = (rawUrl || '').trim().replace(/^['"]|['"]$/g, '');
-const serviceRoleKey = (rawKey || '').trim().replace(/^['"]|['"]$/g, '');
+// Resolve Supabase Service Role Key
+let serviceRoleKey = '';
+
+// Check known key names and fuzzy match
+for (const [k, v] of Object.entries(process.env)) {
+  const normKey = k.trim().toUpperCase();
+  if (
+    normKey === 'SUPABASE_SERVICE_ROLE_KEY' ||
+    normKey === 'SUPABASE_SERVICE_KEY' ||
+    normKey === 'SUPABASE_SECRET_KEY' ||
+    normKey === 'SUPABASE_KEY' ||
+    (normKey.includes('SUPABASE') && (normKey.includes('SERVICE') || normKey.includes('ROLE') || normKey.includes('SECRET')))
+  ) {
+    if (typeof v === 'string' && v.trim().length > 20) {
+      serviceRoleKey = v.trim().replace(/^['"]|['"]$/g, '');
+      console.log(`[SUPABASE ADMIN] Detected key from env var "${k}" (len=${serviceRoleKey.length})`);
+      break;
+    }
+  }
+}
+
+// If still not found, inspect any env variable containing a service_role JWT
+if (!serviceRoleKey) {
+  for (const [k, v] of Object.entries(process.env)) {
+    if (typeof v === 'string' && v.startsWith('eyJ') && v.includes('.')) {
+      try {
+        const payload = JSON.parse(Buffer.from(v.split('.')[1], 'base64').toString());
+        if (payload.role === 'service_role') {
+          serviceRoleKey = v.trim().replace(/^['"]|['"]$/g, '');
+          console.log(`[SUPABASE ADMIN] Auto-detected service_role JWT from env var "${k}"`);
+          break;
+        }
+      } catch (_) {}
+    }
+  }
+}
 
 const isConfigured = Boolean(supabaseUrl && serviceRoleKey);
 

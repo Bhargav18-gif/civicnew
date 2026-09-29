@@ -77,6 +77,7 @@ apiRouter.get(['/', '/health'], (req, res) => {
     service:            'CivicConnect API',
     database:           'Supabase PostgreSQL',
     databaseConfigured: Boolean(supabaseAdmin?.isConfigured),
+    envKeysPresent:     Object.keys(process.env).filter(k => !k.startsWith('npm_') && !k.startsWith('PATH') && !k.startsWith('LESS')),
     auth:               'Firebase Authentication',
     timestamp:          new Date().toISOString()
   });
