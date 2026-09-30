@@ -70,6 +70,22 @@ export const departmentApi = {
   },
 
   /**
+   * Department sets/updates priority on a complaint.
+   */
+  async setPriority(complaintId, priority) {
+    const res = await api.post('/departments/set-priority', { complaintId, priority });
+    return res.data;
+  },
+
+  /**
+   * Get a single complaint with full detail (includes media, timeline, ai_results).
+   */
+  async getComplaintDetail(complaintId) {
+    const res = await api.get(`/complaints/${complaintId}`);
+    return res.data?.complaint ? normalizeComplaintDoc(res.data.complaint) : null;
+  },
+
+  /**
    * Department verifies engineer's completed work.
    * ACCEPT → CITIZEN_VERIFICATION
    * REJECT → IN_PROGRESS (rework)

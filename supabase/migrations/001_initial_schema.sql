@@ -317,6 +317,10 @@ DECLARE
 BEGIN
   FOREACH t IN ARRAY ARRAY['users', 'complaints', 'assignments', 'sla_records'] LOOP
     EXECUTE format(
+      'DROP TRIGGER IF EXISTS set_updated_at ON %I',
+      t
+    );
+    EXECUTE format(
       'CREATE TRIGGER set_updated_at BEFORE UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()',
       t
     );
@@ -348,6 +352,7 @@ ALTER TABLE model_versions    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE training_runs     ENABLE ROW LEVEL SECURITY;
 
 -- Allow public read of departments (non-sensitive reference data)
+DROP POLICY IF EXISTS "departments_public_read" ON departments;
 CREATE POLICY "departments_public_read" ON departments
   FOR SELECT TO anon, authenticated USING (true);
 

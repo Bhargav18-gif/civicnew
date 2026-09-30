@@ -28,7 +28,19 @@ router.post('/classify', async (req, res) => {
 
   try {
     const result = await classifyComplaintText(inputText, image);
-    return res.json(result);
+    const confidenceNum = typeof result.confidence === 'number' ? result.confidence : 0.85;
+    const confPct = Math.round(confidenceNum * 100);
+    const canonicalDept = result.departmentName || result.departmentId || 'General';
+
+    return res.json({
+      success: true,
+      ...result,
+      department: canonicalDept,
+      departmentName: canonicalDept,
+      confidence_percentage: `${confPct}%`,
+      confidence_level: confidenceNum >= 0.85 ? 'high' : (confidenceNum >= 0.70 ? 'medium' : 'low'),
+      reasoningSummary: result.reason
+    });
   } catch (err) {
     console.error('[AI CLASSIFY ROUTE ERROR]', err.message);
     const isModelMissing = err.code === 'MODEL_ARTIFACT_MISSING' || err.message?.includes('MODEL_ARTIFACT_MISSING') || (!process.env.GEMINI_API_KEY && !process.env.VITE_GEMINI_API_KEY);

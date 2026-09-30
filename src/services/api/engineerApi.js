@@ -6,6 +6,7 @@
  */
 
 import api from '../../utils/api.js';
+import { normalizeComplaintDoc } from '../../utils/complaintSchema.js';
 
 export const engineerApi = {
   /**
@@ -15,7 +16,15 @@ export const engineerApi = {
    */
   async listTasks() {
     const res = await api.get('/engineer/tasks');
-    return res.data?.tasks || res.data || [];
+    return (res.data?.tasks || res.data || []).map(t => normalizeComplaintDoc(t));
+  },
+
+  /**
+   * Get single complaint detail with media and full timeline.
+   */
+  async getComplaintDetail(complaintId) {
+    const res = await api.get(`/complaints/${complaintId}`);
+    return res.data?.complaint ? normalizeComplaintDoc(res.data.complaint) : null;
   },
 
   /**
@@ -28,8 +37,30 @@ export const engineerApi = {
   },
 
   /**
+   * Confirm engineer GPS arrival at target site.
+   */
+  async confirmArrival(complaintId, gpsData) {
+    const res = await api.post('/engineer/arrival', {
+      complaintId,
+      gps: gpsData
+    });
+    return res.data;
+  },
+
+  /**
+   * Submit structured field work report.
+   */
+  async submitReport(complaintId, reportPayload) {
+    const res = await api.post('/engineer/report', {
+      complaintId,
+      ...reportPayload
+    });
+    return res.data;
+  },
+
+  /**
    * Submit repair completion evidence.
-   * Requires at least one after photo and detailed completion notes.
+   * afterMedia: array of { url, caption? } or plain URL strings
    */
   async submitEvidence(complaintId, afterMedia, completionNotes, partsUsed = []) {
     const res = await api.post('/engineer/evidence', {
@@ -39,5 +70,18 @@ export const engineerApi = {
       partsUsed
     });
     return res.data;
+  },
+
+  /**
+   * Backwards compatible completion submit.
+   */
+  async submitCompletionEvidence(complaintId, { photos, notes, partsUsed = [], beforePhotos = [], gpsConfirmation = null }) {
+    return this.submitReport(complaintId, {
+      afterMedia: (photos || []).map(url => ({ url: typeof url === 'string' ? url : url.url, caption: 'Repair Photo' })),
+      beforeMedia: (beforePhotos || []).map(url => ({ url: typeof url === 'string' ? url : url.url, caption: 'Before Repair Photo' })),
+      completionNotes: notes,
+      materialsUsed: partsUsed,
+      gpsConfirmation
+    });
   }
 };

@@ -354,7 +354,7 @@ You must return a JSON object strictly adhering to:
             priority: (parsed.priority || 'MEDIUM').toUpperCase(),
             confidence: roundedConf,
             reason: parsed.reason || `Classified into ${canonical.name} by Gemini AI Gateway.`,
-            requiresHumanReview: Boolean(parsed.requiresHumanReview || roundedConf < 0.85),
+            requiresHumanReview: roundedConf < 0.85,
             engine: 'gemini-2.5-flash',
             modelVersion: 'civicconnect-v2.5-flash'
           };

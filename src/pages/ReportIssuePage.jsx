@@ -13,6 +13,11 @@ import { complaintApi } from "../services/api/complaintApi.js";
 import { aiApi } from "../services/api/aiApi.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { emailService } from "../services/emailService.js";
+import {
+  uploadComplaintImage,
+  validateImageFile,
+  deleteOrphanedImage
+} from "../services/storage/complaintImageUpload.js";
 
 export default function ReportIssuePage() {
   const navigate = useNavigate();
@@ -86,29 +91,36 @@ export default function ReportIssuePage() {
     }
 
     setSubmitting(true);
+    let uploadedStoragePath = null; // track for orphan cleanup
     try {
       let imageURL = null;
+      let imagePath = null;
+
+      // ── Supabase Storage Upload ──────────────────────────────────────────
       if (files.length > 0 && files[0]?.file) {
-        try {
-          const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
-          const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "ml_default";
-          if (cloudName) {
-            const cFormData = new FormData();
-            cFormData.append("file", files[0].file);
-            cFormData.append("upload_preset", uploadPreset);
-            const cRes = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
-              method: "POST",
-              body: cFormData
-            });
-            if (cRes.ok) {
-              const cData = await cRes.json();
-              imageURL = cData.secure_url;
-            }
-          }
-        } catch (cErr) {
-          console.warn("Media upload skipped or failed:", cErr.message);
+        const selectedFile = files[0].file;
+
+        // Validate before attempting upload — fail fast with clear message
+        const validation = validateImageFile(selectedFile);
+        if (!validation.valid) {
+          setError(validation.error);
+          setSubmitting(false);
+          return;
         }
+
+        const citizenId = user?.uid || user?.id || 'guest';
+        console.log('[REPORT] Starting image upload to Supabase Storage...');
+
+        const { storagePath, publicUrl } = await uploadComplaintImage(
+          selectedFile,
+          citizenId
+        );
+        uploadedStoragePath = storagePath; // save for orphan cleanup
+        imagePath = storagePath;
+        imageURL = publicUrl;
+        console.log('[REPORT] Image upload complete. Path:', storagePath);
       }
+      // ─────────────────────────────────────────────────────────────────────
 
       const payload = {
         description: form.description.trim(),
@@ -118,10 +130,12 @@ export default function ReportIssuePage() {
         address: location?.address || null,
         userId: user?.uid || user?.id || null,
         userName: user?.name || "Citizen",
-        imageURL,
+        imageURL,    // full public URL → shown in admin gallery
+        imagePath,   // storage path → saved as image_path on complaint record
         category: prediction?.category !== "Pending Server AI Triage" ? prediction?.category : undefined
       };
 
+      console.log('[REPORT] Submitting complaint payload to backend...');
       const complaintDoc = await complaintApi.createComplaint(payload);
       if (!complaintDoc || !complaintDoc.referenceId) {
         throw new Error("Complaint submission failed to generate a reference ID.");
@@ -147,7 +161,12 @@ export default function ReportIssuePage() {
 
       setSubmitted(complaintDoc);
     } catch (err) {
-      console.error("Submission error:", err);
+      console.error('[REPORT] Submission error:', err);
+      // If complaint DB insert failed but image was uploaded, clean up the orphan
+      if (uploadedStoragePath) {
+        console.warn('[REPORT] DB insert failed after image upload — attempting orphan cleanup:', uploadedStoragePath);
+        await deleteOrphanedImage(uploadedStoragePath);
+      }
       setError(`Submission failed: ${err.message || "Failed to persist complaint in database."}`);
     } finally {
       setSubmitting(false);

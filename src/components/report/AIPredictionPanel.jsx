@@ -27,22 +27,22 @@ export default function AIPredictionPanel({ analyzing, prediction }) {
                 <Loader2 size={14} className="animate-spin" />
                 Analyzing uploaded media...
               </div>
-            ) : (
+            ) : prediction ? (
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-slate-400">Detected category</span>
-                  <span className="font-medium text-cyan-300">{prediction.category}</span>
+                  <span className="font-medium text-cyan-300">{prediction.category || "General"}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-slate-400">Confidence</span>
-                  <span className="font-medium text-white">{prediction.confidence}%</span>
+                  <span className="font-medium text-white">{typeof prediction.confidence === 'number' ? `${prediction.confidence}%` : (prediction.confidence || "85%")}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-slate-400">Suggested department</span>
-                  <span className="font-medium text-violet-300">{prediction.department}</span>
+                  <span className="font-medium text-violet-300">{prediction.department || prediction.departmentName || "Municipal Queue"}</span>
                 </div>
               </div>
-            )}
+            ) : null}
           </div>
         </motion.div>
       )}

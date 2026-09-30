@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import Sidebar from "../../components/admin/Sidebar.jsx";
 import DashboardCards from "../../components/admin/DashboardCards.jsx";
-import DepartmentProgress from "../../components/admin/DepartmentProgress.jsx";
 import ComplaintTrends from "../../components/admin/ComplaintTrends.jsx";
+import ComplaintStatusDonut from "../../components/admin/ComplaintStatusDonut.jsx";
 import AdminReviewQueue from "../../components/admin/AdminReviewQueue.jsx";
 import ComplaintDetailsModal from "../../components/admin/ComplaintDetailsModal.jsx";
 import api from "../../utils/api.js";
 import { motion, AnimatePresence } from "framer-motion";
 import Header from "../../components/admin/Header.jsx";
-import { Sparkles, Cpu, CheckCircle2, AlertTriangle, ShieldCheck, Activity } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { normalizeComplaintDoc } from "../../utils/complaintSchema.js";
 
 export default function Dashboard() {
@@ -82,7 +82,7 @@ export default function Dashboard() {
               {/* 1. System Overview Metrics */}
               <DashboardCards stats={stats} />
 
-              {/* 2. Real AI Monitoring Metrics (Part 20) */}
+              {/* 2. Real AI Monitoring Metrics */}
               <div className="glass rounded-3xl p-6 border border-cyan-500/20 bg-cyan-950/10">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
@@ -122,49 +122,21 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* 3. Administrative Review Queue (Part 13) */}
+              {/* 3. Administrative Review Queue */}
               <AdminReviewQueue
                 exceptions={exceptions}
                 onActionCompleted={fetchDashboardData}
                 onSelectIssue={(issue) => setSelectedIssue(issue)}
               />
 
-              {/* 4. Trends and Department Progress */}
-              <div className="grid lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-2 space-y-8">
-                  <ComplaintTrends />
-                  <DepartmentProgress />
+              {/* 4. Trends and Round Status Graph */}
+              <div className="grid lg:grid-cols-3 gap-8 items-stretch">
+                <div className="lg:col-span-2">
+                  <ComplaintTrends stats={stats} />
                 </div>
 
-                <div className="glass rounded-3xl p-6 flex flex-col border border-white/5">
-                  <h3 className="text-lg font-bold font-display text-white mb-2">Administrative Navigation</h3>
-                  <p className="text-slate-400 text-xs mb-6">
-                    Quickly inspect all complaints, manage registered citizens, or configure AI routing thresholds.
-                  </p>
-
-                  <div className="space-y-3 mt-auto">
-                    <button
-                      onClick={() => window.location.href = "/admin/complaints"}
-                      className="w-full flex items-center justify-between p-3.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/[0.08] hover:border-cyan-400/30 transition-all cursor-pointer"
-                    >
-                      <span className="text-xs font-semibold text-slate-300">All Complaints</span>
-                      <span className="text-xs text-cyan-400 font-mono font-bold">&rarr;</span>
-                    </button>
-                    <button
-                      onClick={() => window.location.href = "/admin/users"}
-                      className="w-full flex items-center justify-between p-3.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/[0.08] hover:border-cyan-400/30 transition-all cursor-pointer"
-                    >
-                      <span className="text-xs font-semibold text-slate-300">Registered Citizens & Engineers</span>
-                      <span className="text-xs text-cyan-400 font-mono font-bold">&rarr;</span>
-                    </button>
-                    <button
-                      onClick={() => window.location.href = "/admin/ai-config"}
-                      className="w-full flex items-center justify-between p-3.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/[0.08] hover:border-cyan-400/30 transition-all cursor-pointer"
-                    >
-                      <span className="text-xs font-semibold text-slate-300">AI Routing Configuration</span>
-                      <span className="text-xs text-cyan-400 font-mono font-bold">&rarr;</span>
-                    </button>
-                  </div>
+                <div className="lg:col-span-1">
+                  <ComplaintStatusDonut stats={stats} />
                 </div>
               </div>
             </div>

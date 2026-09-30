@@ -1,14 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import Navbar from "../../components/layout/Navbar.jsx";
-import Footer from "../../components/layout/Footer.jsx";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { engineerApi } from "../../services/api/engineerApi.js";
 import { normalizeComplaintDoc } from "../../utils/complaintSchema.js";
-import { WORKFLOW_STATES } from "../../constants/workflow.js";
+import { WORKFLOW_STATES, STATUS_META, PRIORITY_LEVELS, ROLES } from "../../constants/workflow.js";
+import { calculateDistanceMeters, formatDistance, getDeviceLocation, getDirectionsUrl } from "../../utils/geo.js";
 import StatusBadge from "../../components/ui/StatusBadge.jsx";
-import Button from "../../components/ui/Button.jsx";
-import FileUpload from "../../components/report/FileUpload.jsx";
+import OpsLayout from "../../components/layout/OpsLayout.jsx";
+import EngineerTaskDetailModal from "../../components/engineer/EngineerTaskDetailModal.jsx";
+import EngineerReportForm from "../../components/engineer/EngineerReportForm.jsx";
+import { useRealtimeComplaints } from "../../services/realtime/useRealtimeComplaints.js";
 import toast, { Toaster } from "react-hot-toast";
 import {
   Wrench,
@@ -18,382 +19,735 @@ import {
   UploadCloud,
   CheckCircle2,
   Clock,
+  FileText,
+  RefreshCw,
   AlertCircle,
-  FileText
+  Eye,
+  X,
+  ExternalLink,
+  Zap,
+  Calendar,
+  Building2,
+  Image as ImageIcon,
+  Check,
+  AlertTriangle,
+  Search,
+  Filter,
+  ArrowUpDown,
+  Compass,
+  CheckSquare,
+  Send
 } from "lucide-react";
+
+const PRIORITY_STYLES = {
+  CRITICAL: "bg-red-500/20 text-red-300 border-red-500/30",
+  HIGH:     "bg-orange-500/20 text-orange-300 border-orange-500/30",
+  MEDIUM:   "bg-amber-500/20 text-amber-300 border-amber-500/30",
+  LOW:      "bg-slate-700 text-slate-300 border-slate-600",
+};
 
 export default function EngineerDashboard() {
   const { user } = useAuth();
-  const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedTask, setSelectedTask] = useState(null);
-  const [evidenceModal, setEvidenceModal] = useState(null);
-  const [evidenceFiles, setEvidenceFiles] = useState([]);
-  const [completionNotes, setCompletionNotes] = useState("");
-  const [submittingEvidence, setSubmittingEvidence] = useState(false);
+
+  // ── Navigation & View State ───────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState("dashboard");
+
+  // ── Data State ───────────────────────────────────────────────────────────
+  const [tasks, setTasks]           = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError]           = useState("");
   const [actionLoading, setActionLoading] = useState(false);
 
-  const engineerUid = user?.uid || user?.id;
+  // ── Live Device Location State ───────────────────────────────────────────
+  const [deviceGps, setDeviceGps]   = useState(null);
 
-  // Fetch tasks assigned to this engineer from Supabase via backend API
-  // Backend filters at DB level by engineer's Supabase UUID
+  // ── Search & Filter State ─────────────────────────────────────────────────
+  const [searchQuery, setSearchQuery]       = useState("");
+  const [filterPriority, setFilterPriority] = useState("ALL");
+  const [sortBy, setSortBy]                 = useState("PRIORITY");
+
+  // ── Modals & Drawers ──────────────────────────────────────────────────────
+  const [selectedTask, setSelectedTask]           = useState(null);
+  const [reportComplaintId, setReportComplaintId] = useState(null);
+
+  const engineerName = user?.name || "Field Engineer";
+
+  // ── Retrieve device GPS on mount ─────────────────────────────────────────
   useEffect(() => {
-    if (!engineerUid) {
-      setLoading(false);
-      return;
-    }
+    getDeviceLocation()
+      .then(loc => setDeviceGps(loc))
+      .catch(() => {}); // Non-blocking optional enhancement
+  }, []);
 
-    setLoading(true);
+  // ── Load tasks from Supabase ─────────────────────────────────────────────
+  const loadTasks = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+    setError("");
 
-    engineerApi.listTasks()
-      .then(list => {
-        const sorted = list.map(t => normalizeComplaintDoc(t))
-          .sort((a, b) => new Date(b.createdAt || b.created_at) - new Date(a.createdAt || a.created_at));
-        setTasks(sorted);
-      })
-      .catch(err => {
-        console.error("Failed to fetch engineer tasks:", err.message);
-        toast.error("Failed to fetch assigned engineer tasks.");
-      })
-      .finally(() => setLoading(false));
-  }, [engineerUid]);
-
-  // Handle explicit status step transition (Requirement 26)
-  const handleTransition = async (taskId, targetStatus) => {
-    setActionLoading(true);
     try {
-      await engineerApi.updateStatus(taskId, targetStatus);
-      toast.success(`Task status updated to ${targetStatus}`);
+      const list = await engineerApi.listTasks();
+      const normalized = (list || []).map(t => normalizeComplaintDoc(t));
+      setTasks(normalized);
     } catch (err) {
-      toast.error(err.message || "Failed to update task status.");
+      console.error("Failed to fetch engineer tasks:", err.message);
+      setError("Unable to load assigned tasks. Please check your network connection.");
+      toast.error("Failed to load assigned tasks.");
     } finally {
-      setActionLoading(false);
+      setLoading(false);
+      setRefreshing(false);
     }
-  };
+  }, []);
 
-  // Handle completion evidence submission (Requirement 27)
-  const handleSubmitEvidence = async (e) => {
-    e.preventDefault();
-    if (!evidenceModal) return;
+  useEffect(() => {
+    loadTasks();
+  }, [loadTasks]);
 
-    if (evidenceFiles.length === 0) {
-      toast.error("Please upload at least one authentic repair completion photo.");
-      return;
+  const engineerSupabaseId = user?.supabaseId || user?.id;
+
+  // ── Real-Time Supabase Synchronization ────────────────────────────────────
+  const handleRealtimeInsert = useCallback((newTask) => {
+    setTasks((prev) => {
+      const exists = prev.some((t) => t.id === newTask.id || (t.refId && t.refId === newTask.refId));
+      if (exists) {
+        return prev.map((t) => (t.id === newTask.id || t.refId === newTask.refId ? { ...t, ...newTask } : t));
+      }
+      return [newTask, ...prev];
+    });
+
+    toast(`📋 New Task Assigned: ${newTask.trackingNumber || newTask.category || 'Complaint'}`, {
+      icon: "⚡",
+      duration: 6000,
+      style: { background: "#0c1220", color: "#2dd4bf", border: "1px solid rgba(45,212,191,0.3)" }
+    });
+  }, []);
+
+  const handleRealtimeUpdate = useCallback((updatedTask) => {
+    const isStillAssignedToMe = (
+      updatedTask.assignedEngineerId === engineerSupabaseId ||
+      updatedTask.assigned_engineer_id === engineerSupabaseId
+    );
+
+    if (isStillAssignedToMe) {
+      setTasks((prev) =>
+        prev.map((t) => (t.id === updatedTask.id ? { ...t, ...updatedTask } : t))
+      );
+      setSelectedTask((curr) => (curr && curr.id === updatedTask.id ? { ...curr, ...updatedTask } : curr));
+
+      if (updatedTask.status === WORKFLOW_STATES.CLOSED || updatedTask.status === WORKFLOW_STATES.CITIZEN_VERIFICATION) {
+        toast(`✅ Work Approved: Task ${updatedTask.trackingNumber || ''} verified by department!`, {
+          icon: "🎉",
+          duration: 6000,
+          style: { background: "#0c1220", color: "#34d399", border: "1px solid rgba(52,211,153,0.3)" }
+        });
+      }
+    } else {
+      // Reassigned to another engineer — remove from local task list
+      setTasks((prev) => prev.filter((t) => t.id !== updatedTask.id));
+      setSelectedTask((curr) => (curr && curr.id === updatedTask.id ? null : curr));
+      toast(`ℹ️ Task ${updatedTask.trackingNumber || ''} was reassigned.`, {
+        icon: "🔄",
+        duration: 4000,
+        style: { background: "#0c1220", color: "#94a3b8", border: "1px solid rgba(148,163,184,0.2)" }
+      });
     }
+  }, [engineerSupabaseId]);
 
-    if (!completionNotes.trim() || completionNotes.trim().length < 5) {
-      toast.error("Please provide detailed repair notes explaining the work completed.");
-      return;
-    }
+  const handleRealtimeDelete = useCallback((deletedTask) => {
+    setTasks((prev) => prev.filter((t) => t.id !== deletedTask.id));
+    setSelectedTask((curr) => (curr && curr.id === deletedTask.id ? null : curr));
+  }, []);
 
-    setSubmittingEvidence(true);
-    try {
-      let uploadedPhotoUrl = null;
-      const fileObj = evidenceFiles[0]?.file;
+  const { connectionStatus, reconnect } = useRealtimeComplaints({
+    role: "engineer",
+    engineerId: engineerSupabaseId,
+    onInsert: handleRealtimeInsert,
+    onUpdate: handleRealtimeUpdate,
+    onDelete: handleRealtimeDelete,
+    onSync: () => loadTasks(true)
+  });
 
-      if (fileObj) {
-        const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
-        const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || "ml_default";
+  // ── KPI Summary Stats (Real Data) ─────────────────────────────────────────
+  const stats = useMemo(() => {
+    const total = tasks.length;
+    const assigned = tasks.filter(t => t.status === WORKFLOW_STATES.ASSIGNED).length;
+    const accepted = tasks.filter(t => [WORKFLOW_STATES.ACCEPTED_BY_ENGINEER, WORKFLOW_STATES.EN_ROUTE, WORKFLOW_STATES.ON_SITE].includes(t.status)).length;
+    const inProgress = tasks.filter(t => t.status === WORKFLOW_STATES.IN_PROGRESS).length;
+    const urgent = tasks.filter(t =>
+      ["CRITICAL", "HIGH"].includes((t.priority || "").toUpperCase()) && t.status !== WORKFLOW_STATES.CLOSED
+    ).length;
+    const completed = tasks.filter(t =>
+      [WORKFLOW_STATES.VERIFICATION_PENDING, WORKFLOW_STATES.DEPARTMENT_REVIEW, WORKFLOW_STATES.CITIZEN_VERIFICATION, WORKFLOW_STATES.CLOSED].includes(t.status)
+    ).length;
 
-        if (cloudName) {
-          const formData = new FormData();
-          formData.append("file", fileObj);
-          formData.append("upload_preset", uploadPreset);
+    return { total, assigned, accepted, inProgress, urgent, completed };
+  }, [tasks]);
 
-          const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
-            method: "POST",
-            body: formData
-          });
+  // ── Urgent Tasks (Top Priority Cards) ─────────────────────────────────────
+  const urgentTasks = useMemo(() => {
+    return tasks.filter(t =>
+      ["CRITICAL", "HIGH"].includes((t.priority || "").toUpperCase()) &&
+      ![WORKFLOW_STATES.CLOSED, WORKFLOW_STATES.REJECTED].includes(t.status)
+    ).slice(0, 4);
+  }, [tasks]);
 
-          if (!uploadRes.ok) {
-            throw new Error("Evidence upload failed. Cloud storage rejected the file.");
-          }
-          const uploadData = await uploadRes.json();
-          uploadedPhotoUrl = uploadData.secure_url;
-        } else {
-          // Local blob representation if cloudinary not configured
-          uploadedPhotoUrl = URL.createObjectURL(fileObj);
+  // ── Tab-Filtered & Sorted Work Queue ──────────────────────────────────────
+  const filteredTasks = useMemo(() => {
+    return tasks.filter(t => {
+      // Tab filter
+      if (activeTab === "active") {
+        if (![WORKFLOW_STATES.ASSIGNED, WORKFLOW_STATES.ACCEPTED_BY_ENGINEER, WORKFLOW_STATES.EN_ROUTE, WORKFLOW_STATES.ON_SITE, WORKFLOW_STATES.IN_PROGRESS].includes(t.status)) {
+          return false;
+        }
+      } else if (activeTab === "completed") {
+        if (![WORKFLOW_STATES.VERIFICATION_PENDING, WORKFLOW_STATES.DEPARTMENT_REVIEW, WORKFLOW_STATES.CITIZEN_VERIFICATION, WORKFLOW_STATES.CLOSED].includes(t.status)) {
+          return false;
         }
       }
 
-      if (!uploadedPhotoUrl) {
-        throw new Error("Evidence upload failed. Please retry.");
+      // Search
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const ref = (t.referenceId || t.reference_id || "").toLowerCase();
+        const title = (t.title || "").toLowerCase();
+        const desc = (t.description || "").toLowerCase();
+        const loc = (t.address || "").toLowerCase();
+        if (!ref.includes(q) && !title.includes(q) && !desc.includes(q) && !loc.includes(q)) {
+          return false;
+        }
       }
 
-      await engineerApi.submitCompletionEvidence(evidenceModal.referenceId, {
-        photos: [uploadedPhotoUrl],
-        notes: completionNotes.trim()
-      });
+      // Priority
+      if (filterPriority !== "ALL" && (t.priority || "MEDIUM").toUpperCase() !== filterPriority) {
+        return false;
+      }
 
-      toast.success("Evidence submitted! Task moved to Verification Pending.");
-      setEvidenceModal(null);
-      setEvidenceFiles([]);
-      setCompletionNotes("");
+      return true;
+    }).sort((a, b) => {
+      if (sortBy === "PRIORITY") {
+        const order = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
+        return (order[(b.priority || "MEDIUM").toUpperCase()] || 0) - (order[(a.priority || "MEDIUM").toUpperCase()] || 0);
+      }
+      if (sortBy === "DATE_DESC") {
+        return new Date(b.createdAt || b.created_at) - new Date(a.createdAt || a.created_at);
+      }
+      if (sortBy === "DATE_ASC") {
+        return new Date(a.createdAt || a.created_at) - new Date(b.createdAt || b.created_at);
+      }
+      return 0;
+    });
+  }, [tasks, activeTab, searchQuery, filterPriority, sortBy]);
+
+  // ── Workflow State Transitions ────────────────────────────────────────────
+  async function handleStatusTransition(taskId, nextStatus) {
+    setActionLoading(true);
+    try {
+      await engineerApi.updateStatus(taskId, nextStatus);
+      toast.success(`Task status updated to ${STATUS_META[nextStatus]?.label || nextStatus}.`);
+      await loadTasks(true);
+
+      // Update current selected task modal if open
+      if (selectedTask && selectedTask.id === taskId) {
+        setSelectedTask(prev => ({ ...prev, status: nextStatus }));
+      }
     } catch (err) {
-      toast.error(err.message || "Evidence upload failed. Please retry.");
+      console.error("Status update error:", err);
+      toast.error(err.response?.data?.message || err.message || "Failed to update task status.");
     } finally {
-      setSubmittingEvidence(false);
+      setActionLoading(false);
     }
-  };
+  }
 
-  const activeTasks = tasks.filter(
-    (t) => ![WORKFLOW_STATES.CLOSED, WORKFLOW_STATES.REJECTED].includes(t.workflow?.status)
-  );
+  // ── Confirm Arrival at Target Site ─────────────────────────────────────────
+  async function handleConfirmArrival(taskId, loc, dist) {
+    try {
+      await engineerApi.confirmArrival(taskId, {
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        accuracy: loc.accuracy,
+        timestamp: loc.timestamp,
+        distanceMeters: dist
+      });
+      toast.success("Site arrival confirmed via GPS!");
+    } catch (err) {
+      console.warn("Could not log GPS arrival to backend:", err.message);
+    }
+  }
+
+  // ── Submit Field Report ────────────────────────────────────────────────────
+  async function handleSubmitReport(complaintId, reportPayload) {
+    setActionLoading(true);
+    try {
+      const res = await engineerApi.submitReport(complaintId, reportPayload);
+      toast.success(
+        reportPayload.workStatus === WORKFLOW_STATES.VERIFICATION_PENDING
+          ? "Completion report submitted! Awaiting department verification."
+          : "Work report updated successfully."
+      );
+      setSelectedTask(null);
+      setActiveTab("dashboard");
+      await loadTasks(true);
+    } catch (err) {
+      console.error("Report submit error:", err);
+      toast.error(err.response?.data?.message || err.message || "Failed to submit work report.");
+    } finally {
+      setActionLoading(false);
+    }
+  }
 
   return (
-    <>
-      <Navbar />
-      <Toaster position="top-right" />
-      <div className="min-h-screen px-6 pt-28 pb-20 max-w-6xl mx-auto">
-        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-          {/* Header */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-            <div>
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium border border-teal-500/30 bg-teal-500/10 text-teal-300 mb-2">
-                <Wrench size={14} /> Field Engineering Operations
-              </div>
-              <h1 className="font-display font-bold text-3xl sm:text-4xl text-white tracking-tight">
-                Field Engineer Task Queue
-              </h1>
-              <p className="text-slate-400 text-sm mt-1">
-                Welcome, <span className="text-white font-medium">{user?.name || user?.email}</span>. Manage assigned repair orders and upload verification evidence.
-              </p>
-            </div>
+    <OpsLayout
+      role={ROLES.ENGINEER}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+      onRefresh={() => loadTasks(true)}
+      refreshing={refreshing}
+      notificationCount={stats.urgent}
+      liveStatus={connectionStatus}
+      onReconnect={reconnect}
+    >
+      <Toaster position="top-right" toastOptions={{ style: { background: "#0c1220", color: "#fff", border: "1px solid rgba(255,255,255,0.1)" } }} />
 
-            <div className="flex items-center gap-3">
-              <div className="px-4 py-2 rounded-xl border border-slate-800 bg-slate-900/60 text-right">
-                <span className="text-[11px] text-slate-400 block">Assigned Tasks</span>
-                <span className="text-lg font-bold text-teal-400">{activeTasks.length}</span>
-              </div>
-            </div>
+      {/* ── HEADER ───────────────────────────────────────────────────────── */}
+      <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <h2 className="text-2xl font-black text-white tracking-tight">
+              Good morning, {engineerName}
+            </h2>
+            <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-teal-500/10 text-teal-300 border border-teal-500/20 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
+              On Duty
+            </span>
           </div>
+          <p className="text-sm text-slate-400 mt-1">
+            What work do you need to perform and where do you need to go today?
+          </p>
+        </div>
 
-          {/* Tasks List */}
-          <div className="space-y-4">
-            {loading ? (
-              <div className="py-24 flex justify-center">
-                <div className="w-8 h-8 rounded-full border-2 border-teal-400/30 border-t-teal-400 animate-spin" />
-              </div>
-            ) : tasks.length === 0 ? (
-              <div className="py-20 text-center rounded-3xl border border-slate-800 bg-slate-900/40 p-12">
-                <CheckCircle2 size={40} className="text-teal-400 mx-auto mb-3 opacity-60" />
-                <h3 className="text-base font-semibold text-white">No Assigned Tasks</h3>
-                <p className="text-slate-400 text-xs mt-1">You currently have no pending civic repair tasks assigned to your UID.</p>
-              </div>
-            ) : (
-              tasks.map((task) => {
-                const status = task.workflow?.status || task.status;
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setActiveTab("report")}
+            className="px-4 py-2.5 rounded-xl bg-teal-400 hover:bg-teal-300 text-black text-xs font-bold flex items-center gap-1.5 shadow-[0_0_15px_-3px_rgba(45,212,191,0.4)] transition"
+          >
+            <FileText size={14} />
+            <span>Update Complaint</span>
+          </button>
 
-                return (
-                  <div
-                    key={task.referenceId}
-                    className="p-6 rounded-3xl border border-slate-800 bg-slate-900/60 backdrop-blur-md hover:border-slate-700 transition-all flex flex-col md:flex-row items-start md:items-center justify-between gap-6"
-                  >
-                    {/* Left Details */}
-                    <div className="flex items-start gap-4 flex-1">
-                      {task.media?.before?.[0]?.url ? (
-                        <img
-                          src={task.media.before[0].url}
-                          alt="Issue photo"
-                          className="w-20 h-20 rounded-2xl object-cover border border-slate-800 flex-shrink-0"
-                        />
-                      ) : (
-                        <div className="w-20 h-20 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-center text-slate-600 flex-shrink-0">
-                          <Wrench size={24} />
-                        </div>
-                      )}
-
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-mono text-xs font-semibold text-cyan-400">{task.referenceId}</span>
-                          <StatusBadge status={status} />
-                          <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
-                            task.ai?.priority === 'CRITICAL' ? 'bg-red-500/20 text-red-300 border border-red-500/30' :
-                            task.ai?.priority === 'HIGH' ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30' :
-                            'bg-slate-800 text-slate-300'
-                          }`}>
-                            {task.ai?.priority || 'MEDIUM'}
-                          </span>
-                        </div>
-
-                        <h3 className="text-sm font-semibold text-white">{task.issue?.title || task.title}</h3>
-                        <p className="text-xs text-slate-400 line-clamp-2 mt-0.5">{task.issue?.description || task.description}</p>
-
-                        <div className="flex items-center gap-4 text-xs text-slate-400 mt-3">
-                          <span className="flex items-center gap-1">
-                            <MapPin size={12} className="text-slate-500" />
-                            {task.location?.address || 'Location on map'}
-                          </span>
-                          <span className="flex items-center gap-1 font-mono text-[11px]">
-                            <Clock size={12} className="text-slate-500" />
-                            {new Date(task.createdAt).toLocaleDateString()}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Right Step Machine Action Buttons (Requirement 26) */}
-                    <div className="flex flex-col sm:flex-row items-end gap-2 w-full md:w-auto">
-                      {status === WORKFLOW_STATES.ASSIGNED && (
-                        <Button
-                          variant="primary"
-                          onClick={() => handleTransition(task.referenceId, WORKFLOW_STATES.ACCEPTED_BY_ENGINEER)}
-                          disabled={actionLoading}
-                          icon={CheckCircle2}
-                          className="w-full sm:w-auto text-xs"
-                        >
-                          Accept Assignment
-                        </Button>
-                      )}
-
-                      {status === WORKFLOW_STATES.ACCEPTED_BY_ENGINEER && (
-                        <Button
-                          variant="secondary"
-                          onClick={() => handleTransition(task.referenceId, WORKFLOW_STATES.EN_ROUTE)}
-                          disabled={actionLoading}
-                          icon={Navigation}
-                          className="w-full sm:w-auto text-xs border-orange-500/30 text-orange-300 hover:bg-orange-500/10"
-                        >
-                          Start En Route
-                        </Button>
-                      )}
-
-                      {status === WORKFLOW_STATES.EN_ROUTE && (
-                        <Button
-                          variant="secondary"
-                          onClick={() => handleTransition(task.referenceId, WORKFLOW_STATES.ON_SITE)}
-                          disabled={actionLoading}
-                          icon={MapPin}
-                          className="w-full sm:w-auto text-xs border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/10"
-                        >
-                          Mark Arrived On Site
-                        </Button>
-                      )}
-
-                      {status === WORKFLOW_STATES.ON_SITE && (
-                        <Button
-                          variant="primary"
-                          onClick={() => handleTransition(task.referenceId, WORKFLOW_STATES.IN_PROGRESS)}
-                          disabled={actionLoading}
-                          icon={Play}
-                          className="w-full sm:w-auto text-xs"
-                        >
-                          Begin Work
-                        </Button>
-                      )}
-
-                      {status === WORKFLOW_STATES.IN_PROGRESS && (
-                        <Button
-                          variant="primary"
-                          onClick={() => setEvidenceModal(task)}
-                          disabled={actionLoading}
-                          icon={UploadCloud}
-                          className="w-full sm:w-auto text-xs bg-gradient-to-r from-teal-500 to-cyan-500"
-                        >
-                          Submit Completion Evidence
-                        </Button>
-                      )}
-
-                      {status === WORKFLOW_STATES.VERIFICATION_PENDING && (
-                        <span className="text-xs text-purple-400 font-medium bg-purple-500/10 border border-purple-500/20 px-3 py-1.5 rounded-xl">
-                          Awaiting Department Review
-                        </span>
-                      )}
-
-                      {status === WORKFLOW_STATES.CITIZEN_VERIFICATION && (
-                        <span className="text-xs text-emerald-400 font-medium bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl">
-                          Awaiting Citizen Approval
-                        </span>
-                      )}
-
-                      {status === WORKFLOW_STATES.CLOSED && (
-                        <span className="text-xs text-emerald-400 font-medium">✓ Closed</span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </motion.div>
+          <button
+            onClick={() => loadTasks(true)}
+            disabled={refreshing}
+            className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 text-xs font-semibold flex items-center gap-2 transition"
+          >
+            <RefreshCw size={14} className={refreshing ? "animate-spin text-teal-400" : ""} />
+            <span>Sync Live</span>
+          </button>
+        </div>
       </div>
 
-      {/* Completion Evidence Submission Modal (Requirement 27) */}
-      <AnimatePresence>
-        {evidenceModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl text-left"
-            >
-              <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-                <div>
-                  <h3 className="text-lg font-bold text-white">Submit Completion Evidence</h3>
-                  <p className="text-xs text-teal-400 font-mono">{evidenceModal.referenceId}</p>
+      {/* ── ERROR ALERT ──────────────────────────────────────────────────── */}
+      {error && (
+        <div className="mb-6 p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-300 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <AlertTriangle size={18} />
+            <span className="text-xs font-medium">{error}</span>
+          </div>
+          <button
+            onClick={() => loadTasks(false)}
+            className="px-3 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-xs font-bold text-red-200 transition"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* ── SUMMARY KPI CARDS (Real Database Values) ─────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3.5 mb-8">
+        {/* Assigned */}
+        <div className="p-4 rounded-2xl bg-[#0b101d]/80 border border-white/5 backdrop-blur-md">
+          <div className="flex items-center justify-between text-slate-400 mb-1">
+            <span className="text-xs font-medium uppercase tracking-wider">Assigned</span>
+            <FileText size={15} className="text-slate-400" />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-black text-white">{loading ? "—" : stats.assigned}</span>
+            <span className="text-[10px] text-slate-400">New Tickets</span>
+          </div>
+        </div>
+
+        {/* Accepted */}
+        <div className="p-4 rounded-2xl bg-[#0b101d]/80 border border-cyan-500/20 bg-cyan-500/[0.02] backdrop-blur-md">
+          <div className="flex items-center justify-between text-cyan-300 mb-1">
+            <span className="text-xs font-medium uppercase tracking-wider">Accepted</span>
+            <CheckCircle2 size={15} className="text-cyan-400" />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-black text-cyan-300">{loading ? "—" : stats.accepted}</span>
+            <span className="text-[10px] text-cyan-400/70">En Route / Site</span>
+          </div>
+        </div>
+
+        {/* In Progress */}
+        <div className="p-4 rounded-2xl bg-[#0b101d]/80 border border-amber-500/20 bg-amber-500/[0.02] backdrop-blur-md">
+          <div className="flex items-center justify-between text-amber-300 mb-1">
+            <span className="text-xs font-medium uppercase tracking-wider">In Progress</span>
+            <Wrench size={15} className="text-amber-400" />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-black text-amber-300">{loading ? "—" : stats.inProgress}</span>
+            <span className="text-[10px] text-amber-400/70">Working</span>
+          </div>
+        </div>
+
+        {/* Due Today / Urgent */}
+        <div className="p-4 rounded-2xl bg-[#0b101d]/80 border border-red-500/20 bg-red-500/[0.02] backdrop-blur-md">
+          <div className="flex items-center justify-between text-red-400 mb-1">
+            <span className="text-xs font-medium uppercase tracking-wider">Due Today</span>
+            <Zap size={15} className="text-red-400" />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-black text-red-400">{loading ? "—" : stats.urgent}</span>
+            <span className="text-[10px] text-red-400/70">Urgent SLA</span>
+          </div>
+        </div>
+
+        {/* Completed */}
+        <div className="p-4 rounded-2xl bg-[#0b101d]/80 border border-emerald-500/20 bg-emerald-500/[0.02] backdrop-blur-md col-span-2 sm:col-span-1">
+          <div className="flex items-center justify-between text-emerald-300 mb-1">
+            <span className="text-xs font-medium uppercase tracking-wider">Completed</span>
+            <CheckCircle2 size={15} className="text-emerald-400" />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-black text-emerald-300">{loading ? "—" : stats.completed}</span>
+            <span className="text-[10px] text-emerald-400/70">Submitted</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── TAB: REPORT UPDATE (DEDICATED FORM) ───────────────────────────── */}
+      {activeTab === "report" && (
+        <EngineerReportForm
+          assignedTasks={tasks}
+          selectedComplaintId={reportComplaintId}
+          onComplaintSelect={setReportComplaintId}
+          onSubmitReport={handleSubmitReport}
+          loading={actionLoading}
+          userId={user?.uid || user?.id}
+        />
+      )}
+
+      {/* ── TAB: DASHBOARD (OVERVIEW) & MY COMPLAINTS WORK QUEUE ──────────── */}
+      {(activeTab === "dashboard" || activeTab === "tasks" || activeTab === "active" || activeTab === "completed") && (
+        <div className="space-y-8">
+          {/* URGENT / PRIORITY WORK SECTION */}
+          {activeTab === "dashboard" && urgentTasks.length > 0 && (
+            <div className="space-y-3.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-red-400 animate-ping" />
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-white">
+                    Urgent & High Priority Operations ({urgentTasks.length})
+                  </h3>
                 </div>
-                <button
-                  onClick={() => setEvidenceModal(null)}
-                  className="text-slate-400 hover:text-white text-sm"
-                >
-                  ✕
-                </button>
+                <span className="text-xs text-amber-400 font-semibold">Fast Response Required</span>
               </div>
 
-              <form onSubmit={handleSubmitEvidence} className="mt-4 space-y-4">
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-2">
-                    Repair Photo (Mandatory)
-                  </label>
-                  <FileUpload
-                    files={evidenceFiles}
-                    setFiles={setEvidenceFiles}
-                    accept="image/*"
-                    maxFiles={2}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {urgentTasks.map((t) => {
+                  const p = (t.priority || "MEDIUM").toUpperCase();
+                  const targetSla = p === "CRITICAL" ? "4 Hours" : "24 Hours";
+                  const dist = (deviceGps && t.latitude && t.longitude)
+                    ? calculateDistanceMeters(deviceGps.latitude, deviceGps.longitude, t.latitude, t.longitude)
+                    : null;
+                  const directionsUrl = getDirectionsUrl(t.latitude, t.longitude, t.address);
+
+                  return (
+                    <div
+                      key={t.id}
+                      className="p-5 rounded-3xl bg-[#0c1222] border border-red-500/30 hover:border-red-500/50 transition shadow-xl space-y-3 flex flex-col justify-between"
+                    >
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-mono font-bold text-cyan-400">
+                            {t.referenceId || t.reference_id || `#${t.id?.substring(0, 8)}`}
+                          </span>
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase border ${PRIORITY_STYLES[p] || PRIORITY_STYLES.MEDIUM}`}>
+                            {p}
+                          </span>
+                        </div>
+
+                        <div>
+                          <span className="text-[11px] font-semibold text-teal-400 uppercase tracking-wider">
+                            {t.category || "General"}
+                          </span>
+                          <h4 className="text-sm font-bold text-white mt-0.5 line-clamp-1">
+                            {t.title || t.description}
+                          </h4>
+                          <p className="text-xs text-slate-400 mt-1 line-clamp-2 leading-relaxed">
+                            {t.description}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 text-xs text-slate-300">
+                          <div className="flex items-center gap-1.5 truncate">
+                            <MapPin size={13} className="text-teal-400 shrink-0" />
+                            <span className="truncate">{t.address || "GPS Location"}</span>
+                          </div>
+                          {dist !== null && (
+                            <span className="text-[11px] font-bold text-teal-300 shrink-0 bg-teal-500/10 px-2 py-0.5 rounded-md border border-teal-500/20">
+                              {formatDistance(dist)} away
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-white/5">
+                          <span>Target SLA: <strong className="text-white">{targetSla}</strong></span>
+                          <StatusBadge status={t.status} />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/5">
+                        <a
+                          href={directionsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 text-xs font-bold transition flex items-center justify-center gap-1.5"
+                        >
+                          <Navigation size={13} className="text-teal-400" />
+                          <span>Navigate</span>
+                        </a>
+
+                        <button
+                          onClick={() => setSelectedTask(t)}
+                          className="py-2.5 rounded-xl bg-teal-400 hover:bg-teal-300 text-black text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-md"
+                        >
+                          <Wrench size={13} />
+                          <span>Open Task</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* MY ASSIGNED COMPLAINTS QUEUE (CARDS) */}
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-white">
+                  {activeTab === "active" ? "Active Field Assignments" : activeTab === "completed" ? "Completed Work History" : "My Assigned Complaints"}
+                </h3>
+                <p className="text-xs text-slate-400">
+                  {filteredTasks.length} complaint(s) ready for field execution
+                </p>
+              </div>
+
+              {/* Filters Toolbar */}
+              <div className="flex flex-wrap items-center gap-2.5">
+                <div className="relative min-w-[180px]">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search complaints..."
+                    className="w-full pl-9 pr-3 py-2 bg-slate-900/80 border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-400"
                   />
                 </div>
 
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">
-                    Completion Notes (Mandatory)
-                  </label>
-                  <textarea
-                    rows={3}
-                    required
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-teal-400"
-                    placeholder="Describe specific repair steps taken, materials used, and final physical condition..."
-                    value={completionNotes}
-                    onChange={(e) => setCompletionNotes(e.target.value)}
-                  />
-                </div>
+                <select
+                  value={filterPriority}
+                  onChange={(e) => setFilterPriority(e.target.value)}
+                  className="px-3 py-2 bg-slate-900/80 border border-white/10 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-teal-400"
+                >
+                  <option value="ALL">All Priorities</option>
+                  <option value="CRITICAL">Critical</option>
+                  <option value="HIGH">High</option>
+                  <option value="MEDIUM">Medium</option>
+                  <option value="LOW">Low</option>
+                </select>
 
-                <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
-                  <Button
-                    variant="secondary"
-                    type="button"
-                    onClick={() => setEvidenceModal(null)}
-                    className="text-xs"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="primary"
-                    type="submit"
-                    disabled={submittingEvidence || evidenceFiles.length === 0}
-                    icon={UploadCloud}
-                    className="text-xs"
-                  >
-                    {submittingEvidence ? "Uploading Evidence..." : "Submit for Verification"}
-                  </Button>
-                </div>
-              </form>
-            </motion.div>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="px-3 py-2 bg-slate-900/80 border border-white/10 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-teal-400"
+                >
+                  <option value="PRIORITY">Highest Priority</option>
+                  <option value="DATE_DESC">Newest First</option>
+                  <option value="DATE_ASC">Oldest First</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Task Grid Cards */}
+            {loading ? (
+              <div className="py-16 text-center space-y-3">
+                <RefreshCw size={24} className="mx-auto text-teal-400 animate-spin" />
+                <p className="text-xs text-slate-400">Loading assigned complaints from database...</p>
+              </div>
+            ) : filteredTasks.length === 0 ? (
+              <div className="py-16 text-center rounded-3xl border border-dashed border-white/10 bg-white/[0.01]">
+                <CheckCircle2 size={32} className="mx-auto text-teal-400/60 mb-2" />
+                <p className="text-sm font-semibold text-slate-200">No complaints found</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  {searchQuery || filterPriority !== "ALL"
+                    ? "Try adjusting your search query or filters."
+                    : "No complaints assigned to you in this view."}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredTasks.map((t) => {
+                  const p = (t.priority || "MEDIUM").toUpperCase();
+                  const targetDeadline = p === "CRITICAL" ? "4 Hours" : p === "HIGH" ? "24 Hours" : "72 Hours";
+                  const dist = (deviceGps && t.latitude && t.longitude)
+                    ? calculateDistanceMeters(deviceGps.latitude, deviceGps.longitude, t.latitude, t.longitude)
+                    : null;
+                  const directionsUrl = getDirectionsUrl(t.latitude, t.longitude, t.address);
+
+                  return (
+                    <div
+                      key={t.id}
+                      className="p-5 rounded-3xl bg-[#0a0f1d] border border-white/10 hover:border-teal-500/40 transition shadow-xl flex flex-col justify-between gap-4"
+                    >
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-mono font-bold text-cyan-400">
+                            {t.referenceId || t.reference_id || `#${t.id?.substring(0, 8)}`}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${PRIORITY_STYLES[p] || PRIORITY_STYLES.MEDIUM}`}>
+                            {p}
+                          </span>
+                        </div>
+
+                        <div>
+                          <span className="text-[11px] font-semibold text-teal-400 uppercase tracking-wider">
+                            {t.category || "General"}
+                          </span>
+                          <h4 className="text-sm font-bold text-white mt-0.5 line-clamp-1">
+                            {t.title || t.description}
+                          </h4>
+                          <p className="text-xs text-slate-400 mt-1 line-clamp-2 leading-relaxed">
+                            {t.description}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 text-xs text-slate-300">
+                          <div className="flex items-center gap-1.5 truncate">
+                            <MapPin size={13} className="text-teal-400 shrink-0" />
+                            <span className="truncate">{t.address || "GPS Location"}</span>
+                          </div>
+                          {dist !== null && (
+                            <span className="text-[10px] font-bold text-teal-300 shrink-0 bg-teal-500/10 px-1.5 py-0.5 rounded border border-teal-500/20">
+                              {formatDistance(dist)}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-white/5">
+                          <span>SLA: <strong className="text-slate-200">{targetDeadline}</strong></span>
+                          <StatusBadge status={t.status} />
+                        </div>
+                      </div>
+
+                      {/* 3 Quick Action Buttons: [View] [Navigate] [Update] */}
+                      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/5">
+                        <button
+                          onClick={() => setSelectedTask(t)}
+                          className="py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1 transition"
+                          title="View Complaint Detail"
+                        >
+                          <Eye size={13} />
+                          <span>View</span>
+                        </button>
+
+                        <a
+                          href={directionsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="py-2.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-300 text-xs font-bold flex items-center justify-center gap-1 transition"
+                          title="Open Google Maps Directions"
+                        >
+                          <Navigation size={13} />
+                          <span>Navigate</span>
+                        </a>
+
+                        <button
+                          onClick={() => {
+                            setReportComplaintId(t.id);
+                            setActiveTab("report");
+                          }}
+                          className="py-2.5 rounded-xl bg-teal-400 hover:bg-teal-300 text-black text-xs font-bold flex items-center justify-center gap-1 transition shadow-md"
+                          title="Update Status / Submit Report"
+                        >
+                          <Wrench size={13} />
+                          <span>Update</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        )}
-      </AnimatePresence>
+        </div>
+      )}
 
-      <Footer />
-    </>
+      {/* ── TAB: PROFILE / NOTIFICATIONS / SETTINGS ────────────────────────── */}
+      {activeTab === "profile" && (
+        <div className="p-6 rounded-3xl bg-[#0a0f1d] border border-white/5 max-w-xl space-y-4">
+          <h3 className="text-base font-bold text-white">Field Engineer Profile</h3>
+          <div className="space-y-3 text-xs text-slate-300">
+            <p><strong>Name:</strong> {engineerName}</p>
+            <p><strong>Email:</strong> {user?.email}</p>
+            <p><strong>Role:</strong> FIELD OPERATIONS ENGINEER</p>
+            <p><strong>Department:</strong> {user?.departmentId || user?.department_id || "Civic Operations"}</p>
+            <p><strong>GPS Status:</strong> {deviceGps ? `Active (±${deviceGps.accuracy}m)` : "Location permission not granted"}</p>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "notifications" && (
+        <div className="p-6 rounded-3xl bg-[#0a0f1d] border border-white/5 max-w-2xl space-y-4">
+          <h3 className="text-base font-bold text-white">Field Operations Notifications</h3>
+          <div className="space-y-2">
+            {stats.urgent > 0 ? (
+              <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-300">
+                You have <strong>{stats.urgent}</strong> critical / high-priority task(s) assigned.
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400">No new urgent alerts.</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === "settings" && (
+        <div className="p-6 rounded-3xl bg-[#0a0f1d] border border-white/5 max-w-xl space-y-4">
+          <h3 className="text-base font-bold text-white">Field Operations Settings</h3>
+          <p className="text-xs text-slate-400">GPS location accuracy, offline cache settings, and dispatch alerts.</p>
+        </div>
+      )}
+
+      {/* ── FULL COMPLAINT DETAIL MODAL (SECTIONS A-G) ─────────────────────── */}
+      <EngineerTaskDetailModal
+        task={selectedTask}
+        isOpen={!!selectedTask}
+        onClose={() => setSelectedTask(null)}
+        onStatusTransition={handleStatusTransition}
+        onSubmitEvidence={handleSubmitReport}
+        onConfirmArrival={handleConfirmArrival}
+        onOpenReportForm={(complaintId) => {
+          setSelectedTask(null);
+          setReportComplaintId(complaintId);
+          setActiveTab("report");
+        }}
+        actionLoading={actionLoading}
+        userId={user?.uid || user?.id}
+      />
+    </OpsLayout>
   );
 }

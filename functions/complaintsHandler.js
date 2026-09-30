@@ -134,6 +134,13 @@ async function submitComplaint(req, res) {
   const longitude = typeof body.lng === 'number' ? body.lng  : (body.location?.lng  || null);
   const address   = body.address || body.location?.address || null;
   const initialCategory = body.category || 'General';
+  // Image references — storagePath from Supabase Storage, imageURL is the public URL
+  const imagePath = body.imagePath || null;
+  const imageUrl  = body.imageURL || body.media?.before?.[0]?.url || null;
+
+  if (imagePath) {
+    console.log(`[COMPLAINT ${requestId}] Image path received: ${imagePath}`);
+  }
 
   // Deterministic Safety Hazard Pre-Check (instant, no external AI latency)
   const priorityEval = evaluatePriority(description, 'MEDIUM');
@@ -156,7 +163,8 @@ async function submitComplaint(req, res) {
       longitude,
       address,
       departmentId: null,
-      slaDeadline
+      slaDeadline,
+      imagePath     // saved as image_path column on the complaint row
     });
   } catch (dbErr) {
     console.error(`[COMPLAINT ${requestId}] DB createComplaint failed (${Date.now() - dbStart}ms):`, dbErr.message);
@@ -169,10 +177,14 @@ async function submitComplaint(req, res) {
   console.log(`[COMPLAINT ${requestId}] Complaint persisted in ${Date.now() - dbStart}ms. id=${complaint.id}`);
 
   // Store Media (synchronous, before response)
-  const imageUrl = body.imageURL || body.media?.before?.[0]?.url || null;
+  // imageUrl: public URL from Supabase Storage (or any other source)
+  // imagePath: storage path saved on the complaints row for direct retrieval
+  const derivedImageUrl = imageUrl || null;
   const beforeMedia = [];
-  if (imageUrl) beforeMedia.push({ url: imageUrl, caption: 'Citizen Report Photo' });
+  if (derivedImageUrl) beforeMedia.push({ url: derivedImageUrl, caption: 'Citizen Report Photo', storagePath: imagePath });
   else if (Array.isArray(body.media?.before)) beforeMedia.push(...body.media.before);
+
+  console.log(`[COMPLAINT ${requestId}] Media to store: ${beforeMedia.length} item(s). image_path=${imagePath || 'none'}`);
 
   for (const m of beforeMedia) {
     try {
@@ -235,7 +247,7 @@ async function submitComplaint(req, res) {
     let routeDecision = null;
 
     try {
-      aiResult = await classifyComplaintText(description, imageUrl);
+      aiResult = await classifyComplaintText(description, imageUrl || imagePath);
       aiProcessingStatus = 'COMPLETED';
       category = aiResult.category || initialCategory;
       priority = aiResult.priority || initialPriority;

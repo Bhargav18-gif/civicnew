@@ -5,6 +5,7 @@
  */
 
 import { WORKFLOW_STATES, PRIORITY_LEVELS, PRIORITY_SLA_HOURS } from '../constants/workflow.js';
+import { getPublicImageUrl } from '../services/storage/complaintImageUpload.js';
 
 export function generateReferenceId() {
   const year = new Date().getFullYear();
@@ -50,9 +51,13 @@ export function createCanonicalComplaint(data = {}) {
   };
 
   // Normalize media arrays
-  const beforeMedia = Array.isArray(data.media?.before)
-    ? data.media.before
-    : (data.imageURL ? [{ url: data.imageURL, uploadedAt: now, caption: "Report Photo" }] : (data.citizenPhotos || []));
+  const storedImagePath = data.image_path || data.imagePath || null;
+  const derivedPublicUrl = storedImagePath ? getPublicImageUrl(storedImagePath) : null;
+  const primaryImageUrl = data.imageURL || data.imageUrl || derivedPublicUrl || null;
+
+  const beforeMedia = Array.isArray(data.media?.before) && data.media.before.length > 0
+    ? data.media.before.map(m => typeof m === 'string' ? { url: m } : { ...m, url: m.url || (m.storagePath ? getPublicImageUrl(m.storagePath) : (m.fileUrl || m.file_url)) })
+    : (primaryImageUrl ? [{ url: primaryImageUrl, storagePath: storedImagePath, uploadedAt: now, caption: "Report Photo" }] : (data.citizenPhotos || []));
 
   const afterMedia = Array.isArray(data.media?.after)
     ? data.media.after
@@ -180,6 +185,8 @@ export function normalizeComplaintDoc(raw = {}, docId = null) {
     userName: canonical.citizen.name,
     userEmail: canonical.citizen.email,
     imageURL: canonical.media.before[0]?.url || raw.imageURL || null,
+    image_path: raw.image_path || raw.imagePath || null,
+    imagePath: raw.image_path || raw.imagePath || null,
     citizenPhotos: canonical.media.before,
     engineerPhotos: canonical.media.after,
     address: canonical.location.address,

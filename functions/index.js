@@ -40,8 +40,10 @@ const {
 
 const {
   listEngineerTasks,
+  getEngineerTaskDetail,
   updateStatus,
-  submitEvidence
+  submitEvidence,
+  confirmArrival
 } = require('./engineerHandler');
 
 const {
@@ -216,9 +218,13 @@ apiRouter.post(['/complaints/:id/citizen-verify', '/verify-completion'], async (
 });
 
 // Engineer Workflow Routes
-apiRouter.get('/engineer/tasks',    requireRole('engineer', 'admin'), listEngineerTasks);
-apiRouter.post('/engineer/status',  requireRole('engineer', 'admin'), updateStatus);
+apiRouter.get('/engineer/tasks',     requireRole('engineer', 'admin'), listEngineerTasks);
+apiRouter.get('/engineer/tasks/:id', requireRole('engineer', 'admin'), getEngineerTaskDetail);
+apiRouter.post('/engineer/status',   requireRole('engineer', 'admin'), updateStatus);
+
 apiRouter.post('/engineer/evidence', requireRole('engineer', 'admin'), submitEvidence);
+apiRouter.post('/engineer/report',   requireRole('engineer', 'admin'), submitEvidence);
+apiRouter.post('/engineer/arrival',  requireRole('engineer', 'admin'), confirmArrival);
 
 // Mount under /api (for Hosting rewrites) and / (for direct function URLs)
 app.use('/api', apiRouter);

@@ -376,9 +376,13 @@ async function getAIConfig(req, res) {
   return res.json({
     success:                 true,
     autoRoutingEnabled:      true,
-    highConfidenceThreshold: 0.85,
-    adminReviewThreshold:    0.70,
-    duplicateThreshold:      0.80
+    highConfidenceThreshold: 85,
+    adminReviewThreshold:    70,
+    duplicateThreshold:      80,
+    auto_assign_enabled:     true,
+    high_confidence_threshold: 85,
+    admin_review_threshold:  70,
+    duplicate_threshold:     80
   });
 }
 
@@ -388,13 +392,22 @@ async function getAIConfig(req, res) {
  */
 async function updateAIConfig(req, res) {
   const updates = req.body || {};
+  const isAutoEnabled = Boolean(updates.auto_assign_enabled ?? updates.autoRoutingEnabled ?? true);
+  const highConf = Number(updates.high_confidence_threshold ?? updates.highConfidenceThreshold ?? 85);
+  const adminConf = Number(updates.admin_review_threshold ?? updates.adminReviewThreshold ?? 70);
+  const dupThresh = Number(updates.duplicate_threshold ?? updates.duplicateThreshold ?? 80);
+
   return res.json({
     success: true,
     config: {
-      autoRoutingEnabled:      Boolean(updates.autoRoutingEnabled ?? true),
-      highConfidenceThreshold: Number(updates.highConfidenceThreshold || 0.85),
-      adminReviewThreshold:    Number(updates.adminReviewThreshold || 0.70),
-      duplicateThreshold:      Number(updates.duplicateThreshold || 0.80)
+      autoRoutingEnabled:        isAutoEnabled,
+      highConfidenceThreshold:   highConf,
+      adminReviewThreshold:      adminConf,
+      duplicateThreshold:        dupThresh,
+      auto_assign_enabled:       isAutoEnabled,
+      high_confidence_threshold: highConf,
+      admin_review_threshold:    adminConf,
+      duplicate_threshold:       dupThresh
     }
   });
 }

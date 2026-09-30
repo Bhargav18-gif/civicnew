@@ -57,6 +57,36 @@ async function getUserById(userId) {
  * Called during auth flow to sync Firebase user → Supabase users table.
  */
 async function upsertUser({ firebaseUid, name, email, role = 'CITIZEN', phone = null, departmentId = null }) {
+  // Check if a user with this email or firebase_uid already exists in DB
+  const { data: existingUser } = await supabaseAdmin
+    .from('users')
+    .select('*')
+    .or(`firebase_uid.eq.${firebaseUid},email.eq.${email}`)
+    .maybeSingle();
+
+  if (existingUser) {
+    const updatePayload = {
+      firebase_uid: firebaseUid,
+      name: name || existingUser.name,
+      email: email || existingUser.email,
+      role: existingUser.role || role.toUpperCase(),
+      department_id: existingUser.department_id || departmentId,
+      phone: phone || existingUser.phone,
+      is_active: true,
+      last_login_at: new Date().toISOString()
+    };
+
+    const { data, error } = await supabaseAdmin
+      .from('users')
+      .update(updatePayload)
+      .eq('id', existingUser.id)
+      .select()
+      .single();
+
+    if (error) throw new Error(`DB_ERROR: Failed to update user: ${error.message}`);
+    return data;
+  }
+
   const payload = {
     firebase_uid: firebaseUid,
     name,
@@ -70,11 +100,11 @@ async function upsertUser({ firebaseUid, name, email, role = 'CITIZEN', phone = 
 
   const { data, error } = await supabaseAdmin
     .from('users')
-    .upsert(payload, { onConflict: 'firebase_uid', ignoreDuplicates: false })
+    .insert(payload)
     .select()
     .single();
 
-  if (error) throw new Error(`DB_ERROR: Failed to upsert user: ${error.message}`);
+  if (error) throw new Error(`DB_ERROR: Failed to insert user: ${error.message}`);
   return data;
 }
 
@@ -130,7 +160,7 @@ async function createComplaint(payload) {
   const {
     referenceId, citizenId, title, description, category,
     priority = 'MEDIUM', latitude, longitude, address,
-    departmentId, slaDeadline
+    departmentId, slaDeadline, imagePath
   } = payload;
 
   const { data, error } = await supabaseAdmin
@@ -149,7 +179,8 @@ async function createComplaint(payload) {
       department_id: departmentId || null,
       routing_method: 'PENDING',
       sla_deadline:  slaDeadline || null,
-      sla_breached:  false
+      sla_breached:  false,
+      image_path:    imagePath || null
     })
     .select()
     .single();
@@ -162,6 +193,8 @@ async function createComplaint(payload) {
  * Fetch a single complaint by referenceId or UUID.
  */
 async function getComplaintById(id) {
+  if (!id || id === 'undefined' || id === 'null') return null;
+
   // Try reference_id first (human-readable), then UUID
   let { data, error } = await supabaseAdmin
     .from('complaints')
@@ -170,6 +203,10 @@ async function getComplaintById(id) {
     .single();
 
   if (error?.code === 'PGRST116' || !data) {
+    // Check if valid UUID format before querying UUID primary key
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+    if (!isUuid) return null;
+
     const res = await supabaseAdmin
       .from('complaints')
       .select('*')
@@ -180,7 +217,7 @@ async function getComplaintById(id) {
   }
 
   if (error) {
-    if (error.code === 'PGRST116') return null;
+    if (error.code === 'PGRST116' || error.code === '22P02') return null;
     throw new Error(`DB_ERROR: ${error.message}`);
   }
   return data;

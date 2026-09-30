@@ -15,7 +15,8 @@ const {
   listDepartmentEngineers,
   assignEngineer,
   workflowAction,
-  verifyWork
+  verifyWork,
+  setPriority
 } = require('../departmentsHandler');
 
 // List all canonical departments from Supabase
@@ -65,6 +66,14 @@ router.post('/workflow-action', requireRole('department', 'admin'), async (req, 
 router.post('/verify-work', requireRole('department', 'admin'), async (req, res) => {
   try {
     return await verifyWork(req, res);
+  } catch (err) {
+    return res.status(500).json({ code: 'INTERNAL_ERROR', message: err.message });
+  }
+});
+
+router.post('/set-priority', requireRole('department', 'admin'), async (req, res) => {
+  try {
+    return await setPriority(req, res);
   } catch (err) {
     return res.status(500).json({ code: 'INTERNAL_ERROR', message: err.message });
   }

@@ -149,7 +149,7 @@ export default function AIModelConfig() {
                         <label className="block text-sm font-semibold text-slate-400 mb-2">High Confidence Threshold (%)</label>
                         <input
                           type="number"
-                          value={automationConfig.high_confidence_threshold}
+                          value={automationConfig.high_confidence_threshold ?? automationConfig.highConfidenceThreshold ?? 85}
                           onChange={e => setAutomationConfig({ ...automationConfig, high_confidence_threshold: Number(e.target.value) })}
                           className="w-full bg-slate-900 border border-white/10 rounded-xl py-3 px-4 text-white focus:outline-none focus:border-cyan-400/50"
                         />
@@ -157,8 +157,8 @@ export default function AIModelConfig() {
                       <div>
                         <label className="block text-sm font-semibold text-slate-400 mb-2">Auto-Assign Enabled</label>
                         <select
-                          value={automationConfig.auto_assign_enabled.toString()}
-                          onChange={e => setAutomationConfig({ ...automationConfig, auto_assign_enabled: e.target.value === "true" })}
+                          value={Boolean(automationConfig.auto_assign_enabled ?? automationConfig.autoRoutingEnabled ?? true).toString()}
+                          onChange={e => setAutomationConfig({ ...automationConfig, auto_assign_enabled: e.target.value === "true", autoRoutingEnabled: e.target.value === "true" })}
                           className="w-full bg-slate-900 border border-white/10 rounded-xl py-3 px-4 text-white focus:outline-none focus:border-cyan-400/50 cursor-pointer"
                         >
                           <option value="true">Enabled (Auto-route high confidence)</option>
@@ -189,10 +189,10 @@ export default function AIModelConfig() {
                       modelVersions.map((version, i) => (
                         <div key={i} className="bg-slate-900/50 border border-white/5 rounded-xl p-4 flex justify-between items-center">
                           <div>
-                            <p className="text-white font-semibold text-sm">{version.id}</p>
-                            <p className="text-xs text-slate-500 mt-1">Deployed: {new Date(version.deployed_at).toLocaleString()}</p>
+                            <p className="text-white font-semibold text-sm">{version.id || version.modelName || `Model v${i+1}`}</p>
+                            <p className="text-xs text-slate-500 mt-1">Deployed: {new Date(version.deployed_at || version.createdAt || Date.now()).toLocaleString()}</p>
                           </div>
-                          {version.active && (
+                          {(version.active ?? true) && (
                             <span className="bg-emerald-500/20 text-emerald-400 text-xs px-3 py-1 rounded-full border border-emerald-500/20 font-bold uppercase tracking-wider">
                               Active
                             </span>

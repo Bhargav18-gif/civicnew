@@ -94,28 +94,28 @@ async function updateStatus(req, res) {
 }
 
 /**
- * POST /api/engineer/evidence
- * Submit repair completion evidence.
- * Requires at least one authentic after photo and detailed completion notes.
+ * POST /api/engineer/evidence or /api/engineer/report
+ * Submit repair completion evidence or field work report.
  */
 async function submitEvidence(req, res) {
-  const { complaintId, afterMedia = [], completionNotes = '', partsUsed = [] } = req.body;
+  const {
+    complaintId,
+    afterMedia = [],
+    beforeMedia = [],
+    completionNotes = '',
+    workDescription = '',
+    findings = '',
+    actionTaken = '',
+    materialsUsed = [],
+    additionalNotes = '',
+    gpsConfirmation = null,
+    workStatus = WORKFLOW_STATES.VERIFICATION_PENDING
+  } = req.body;
+
   const engineerSupabaseId = req.user?.supabaseId;
 
   if (!complaintId) {
     return res.status(400).json({ code: 'VALIDATION_ERROR', message: 'complaintId is required.' });
-  }
-  if (!Array.isArray(afterMedia) || afterMedia.length === 0) {
-    return res.status(400).json({
-      code: 'VALIDATION_ERROR',
-      message: 'At least one authentic repair photograph is required.'
-    });
-  }
-  if (!completionNotes || completionNotes.trim().length < 5) {
-    return res.status(400).json({
-      code: 'VALIDATION_ERROR',
-      message: 'Detailed completion notes are required (minimum 5 characters).'
-    });
   }
 
   const complaint = await getComplaintById(complaintId);
@@ -134,25 +134,64 @@ async function submitEvidence(req, res) {
   }
 
   const currentStatus = complaint.status;
-  if (!canTransition(currentStatus, WORKFLOW_STATES.VERIFICATION_PENDING, 'engineer')) {
-    return res.status(400).json({
-      code: 'INVALID_TRANSITION',
-      message: `Cannot submit verification evidence from current status ${currentStatus}.`
-    });
+
+  // Determine target status
+  let nextStatus = workStatus === 'IN_PROGRESS'
+    ? WORKFLOW_STATES.IN_PROGRESS
+    : WORKFLOW_STATES.VERIFICATION_PENDING;
+
+  if (nextStatus === WORKFLOW_STATES.VERIFICATION_PENDING) {
+    if (!canTransition(currentStatus, WORKFLOW_STATES.VERIFICATION_PENDING, 'engineer')) {
+      return res.status(400).json({
+        code: 'INVALID_TRANSITION',
+        message: `Cannot submit verification evidence from current status ${currentStatus}.`
+      });
+    }
   }
 
-  // Store after media in complaint_media table
-  const normalizedAfter = afterMedia.map(item =>
-    typeof item === 'string' ? { url: item, caption: 'Repair Photo' } : item
-  );
+  // Format structured notes
+  const noteParts = [];
+  if (workDescription) noteParts.push(`[Work Performed]: ${workDescription}`);
+  if (findings)        noteParts.push(`[Findings]: ${findings}`);
+  if (actionTaken)     noteParts.push(`[Action Taken]: ${actionTaken}`);
+  if (materialsUsed && materialsUsed.length > 0) {
+    const matStr = Array.isArray(materialsUsed) ? materialsUsed.join(', ') : materialsUsed;
+    noteParts.push(`[Materials Used]: ${matStr}`);
+  }
+  if (additionalNotes) noteParts.push(`[Additional Notes]: ${additionalNotes}`);
+  if (completionNotes && !workDescription) noteParts.push(completionNotes);
 
+  const formattedNotes = noteParts.join('\n\n') || completionNotes || 'Field work report submitted.';
+
+  // 1. Store before media in complaint_media table
+  const normalizedBefore = (beforeMedia || []).map(item =>
+    typeof item === 'string' ? { url: item, caption: 'Before Repair Photo' } : item
+  );
+  for (const m of normalizedBefore) {
+    try {
+      await addComplaintMedia({
+        complaintId:  complaint.id,
+        mediaType:    'BEFORE',
+        fileUrl:      m.url || m,
+        caption:      m.caption || 'Before Repair Photo',
+        uploadedBy:   engineerSupabaseId
+      });
+    } catch (mediaErr) {
+      console.warn('[ENGINEER] Before media insert failed:', mediaErr.message);
+    }
+  }
+
+  // 2. Store after media in complaint_media table
+  const normalizedAfter = (afterMedia || []).map(item =>
+    typeof item === 'string' ? { url: item, caption: 'After Repair Photo' } : item
+  );
   for (const m of normalizedAfter) {
     try {
       await addComplaintMedia({
         complaintId:  complaint.id,
         mediaType:    'AFTER',
         fileUrl:      m.url || m,
-        caption:      m.caption || 'Repair Photo',
+        caption:      m.caption || 'After Repair Photo',
         uploadedBy:   engineerSupabaseId
       });
     } catch (mediaErr) {
@@ -160,57 +199,124 @@ async function submitEvidence(req, res) {
     }
   }
 
-  // Optional AI verification recommendation (advisory only — never auto-closes)
-  let aiVerificationResult = null;
-  const afterUrl = normalizedAfter[0]?.url;
-
-  if (afterUrl) {
-    // Get before media URL from stored complaint media (or fallback)
-    const beforeUrl = null; // Would be fetched from complaint_media table if needed
-
-    if (beforeUrl && afterUrl) {
-      try {
-        aiVerificationResult = await verifyCompletionEvidence(
-          beforeUrl,
-          afterUrl,
-          complaint.description
-        );
-      } catch (aiErr) {
-        console.warn('[ENGINEER] AI verification evaluation skipped:', aiErr.message);
-        // No fake result — aiVerificationResult remains null
-      }
-    }
-  }
-
   // Update complaint
-  await updateComplaintStatus(complaint.id, WORKFLOW_STATES.VERIFICATION_PENDING, {
+  const partsArray = Array.isArray(materialsUsed)
+    ? materialsUsed
+    : (typeof materialsUsed === 'string' && materialsUsed.trim() ? [materialsUsed] : []);
+
+  await updateComplaintStatus(complaint.id, nextStatus, {
     previousStatus: currentStatus,
-    engineer_notes: completionNotes,
-    parts_used:     partsUsed.length > 0 ? partsUsed : null
+    engineer_notes: formattedNotes,
+    parts_used:     partsArray.length > 0 ? partsArray : null
   });
 
+  // Record audit event
   await recordAuditEvent({
     complaintId:  complaint.id,
     actorId:      engineerSupabaseId,
     actorRole:    'engineer',
-    eventType:    'EVIDENCE_SUBMITTED',
+    eventType:    nextStatus === WORKFLOW_STATES.VERIFICATION_PENDING ? 'EVIDENCE_SUBMITTED' : 'WORK_REPORT_UPDATED',
     oldStatus:    currentStatus,
-    newStatus:    WORKFLOW_STATES.VERIFICATION_PENDING,
+    newStatus:    nextStatus,
     metadata:     {
-      photoCount:       normalizedAfter.length,
-      aiRecommendation: aiVerificationResult?.recommendation || null
+      photoCount:       normalizedAfter.length + normalizedBefore.length,
+      beforeCount:      normalizedBefore.length,
+      afterCount:       normalizedAfter.length,
+      gpsConfirmation:  gpsConfirmation || null
     }
   });
 
   return res.json({
-    success:          true,
-    status:           WORKFLOW_STATES.VERIFICATION_PENDING,
-    aiRecommendation: aiVerificationResult
+    success: true,
+    status:  nextStatus,
+    notes:   formattedNotes
   });
+}
+
+/**
+ * POST /api/engineer/arrival
+ * Confirm engineer GPS arrival on site.
+ */
+async function confirmArrival(req, res) {
+  const { complaintId, gps } = req.body;
+  const engineerSupabaseId = req.user?.supabaseId;
+
+  if (!complaintId) {
+    return res.status(400).json({ code: 'VALIDATION_ERROR', message: 'complaintId is required.' });
+  }
+
+  const complaint = await getComplaintById(complaintId);
+  if (!complaint) {
+    return res.status(404).json({ code: 'NOT_FOUND', message: 'Complaint not found.' });
+  }
+
+  if (
+    req.user?.role !== 'admin' &&
+    complaint.assigned_engineer_id !== engineerSupabaseId
+  ) {
+    return res.status(403).json({
+      code: 'FORBIDDEN',
+      message: 'You are not assigned to this complaint.'
+    });
+  }
+
+  // Record audit log for GPS arrival
+  await recordAuditEvent({
+    complaintId:  complaint.id,
+    actorId:      engineerSupabaseId,
+    actorRole:    'engineer',
+    eventType:    'ENGINEER_ARRIVED_GPS',
+    oldStatus:    complaint.status,
+    newStatus:    complaint.status,
+    metadata:     {
+      gps: gps || null,
+      confirmedAt: new Date().toISOString()
+    }
+  });
+
+  return res.json({
+    success: true,
+    message: 'Arrival location confirmed.',
+    gps
+  });
+}
+
+/**
+ * GET /api/engineer/tasks/:id
+ * Retrieve detail of a single task assigned to this engineer.
+ * Rejects with 403 if assigned_engineer_id !== req.user.supabaseId (unless admin).
+ */
+async function getEngineerTaskDetail(req, res) {
+  const { id } = req.params;
+  const engineerSupabaseId = req.user?.supabaseId;
+
+  if (!id) {
+    return res.status(400).json({ code: 'VALIDATION_ERROR', message: 'Task ID is required.' });
+  }
+
+  const complaint = await getComplaintById(id);
+  if (!complaint) {
+    return res.status(404).json({ code: 'NOT_FOUND', message: 'Task not found.' });
+  }
+
+  if (
+    req.user?.role !== 'admin' &&
+    complaint.assigned_engineer_id !== engineerSupabaseId
+  ) {
+    return res.status(403).json({
+      code: 'FORBIDDEN',
+      message: 'Access denied: You are not authorized to view this complaint.'
+    });
+  }
+
+  return res.json({ complaint });
 }
 
 module.exports = {
   listEngineerTasks,
+  getEngineerTaskDetail,
   updateStatus,
-  submitEvidence
+  submitEvidence,
+  confirmArrival
 };
+

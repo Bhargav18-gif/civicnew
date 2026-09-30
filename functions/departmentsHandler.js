@@ -169,7 +169,11 @@ async function assignEngineer(req, res) {
     type:        'task_assigned'
   });
 
-  return res.json({ success: true, message: 'Engineer assigned successfully.' });
+  return res.json({
+    success: true,
+    status: WORKFLOW_STATES.ASSIGNED,
+    message: 'Engineer assigned successfully.'
+  });
 }
 
 /**
@@ -300,10 +304,70 @@ async function verifyWork(req, res) {
   return res.json({ success: true, status: nextStatus });
 }
 
+/**
+ * POST /api/departments/set-priority
+ * Department sets or updates complaint priority.
+ */
+async function setPriority(req, res) {
+  const { complaintId, priority } = req.body;
+  const VALID_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+
+  if (!complaintId || !priority) {
+    return res.status(400).json({
+      code: 'VALIDATION_ERROR',
+      message: 'complaintId and priority are required.'
+    });
+  }
+
+  const normalizedPriority = String(priority).toUpperCase();
+  if (!VALID_PRIORITIES.includes(normalizedPriority)) {
+    return res.status(400).json({
+      code: 'VALIDATION_ERROR',
+      message: `Priority must be one of: ${VALID_PRIORITIES.join(', ')}`
+    });
+  }
+
+  const complaint = await getComplaintById(complaintId);
+  if (!complaint) {
+    return res.status(404).json({ code: 'NOT_FOUND', message: 'Complaint not found.' });
+  }
+
+  // Enforce department scoping
+  if (req.user?.role === 'department' && req.user.departmentId !== complaint.department_id) {
+    return res.status(403).json({
+      code: 'FORBIDDEN',
+      message: 'You can only update priority for complaints in your department.'
+    });
+  }
+
+  const { supabaseAdmin } = require('./lib/supabaseAdmin');
+  const { error } = await supabaseAdmin
+    .from('complaints')
+    .update({ priority: normalizedPriority })
+    .eq('id', complaint.id);
+
+  if (error) {
+    return res.status(500).json({ code: 'DB_ERROR', message: error.message });
+  }
+
+  await recordAuditEvent({
+    complaintId:  complaint.id,
+    actorId:      req.user?.supabaseId || null,
+    actorRole:    req.user?.role || 'department',
+    eventType:    'PRIORITY_UPDATED',
+    oldStatus:    complaint.status,
+    newStatus:    complaint.status,
+    metadata:     { oldPriority: complaint.priority, newPriority: normalizedPriority }
+  });
+
+  return res.json({ success: true, priority: normalizedPriority });
+}
+
 module.exports = {
   listDepartmentComplaints,
   listDepartmentEngineers,
   assignEngineer,
   workflowAction,
-  verifyWork
+  verifyWork,
+  setPriority
 };
