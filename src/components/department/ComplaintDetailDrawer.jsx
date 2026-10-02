@@ -322,7 +322,70 @@ export default function ComplaintDetailDrawer({
             </div>
           </div>
 
-          {/* Section 6: Workflow Timeline */}
+          {/* Section 6: Engineer Completion Evidence (Live Real-Time Sync) */}
+          {([WORKFLOW_STATES.VERIFICATION_PENDING, WORKFLOW_STATES.DEPARTMENT_REVIEW, WORKFLOW_STATES.CITIZEN_VERIFICATION, WORKFLOW_STATES.CLOSED].includes(rawStatus) || complaint.engineerNotes || complaint.afterPhotoUrl) && (
+            <div className="p-4 rounded-2xl bg-emerald-500/[0.03] border border-emerald-500/20 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <ShieldCheck size={14} className="text-emerald-400" />
+                  <span>Engineer Completion Evidence</span>
+                </label>
+                {rawStatus === WORKFLOW_STATES.VERIFICATION_PENDING && (
+                  <button
+                    onClick={() => onVerifyClick?.(complaint)}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-[11px] font-bold shadow-[0_0_10px_rgba(16,185,129,0.3)] transition"
+                  >
+                    Verify & Approve
+                  </button>
+                )}
+              </div>
+
+              {/* After Photo Preview */}
+              {(complaint.afterPhotoUrl || complaint.after_photo_url || (Array.isArray(complaint.media?.after) && complaint.media.after[0]?.url)) ? (
+                <div className="relative group overflow-hidden rounded-xl bg-black/40 border border-white/10 max-h-48 flex items-center justify-center">
+                  <img
+                    src={complaint.afterPhotoUrl || complaint.after_photo_url || complaint.media.after[0]?.url}
+                    alt="Engineer Repair Evidence"
+                    className="w-full h-44 object-cover group-hover:scale-105 transition duration-300"
+                  />
+                  <button
+                    onClick={() => setLightboxImage(complaint.afterPhotoUrl || complaint.after_photo_url || complaint.media.after[0]?.url)}
+                    className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-2 text-white text-xs font-semibold backdrop-blur-xs transition"
+                  >
+                    <Eye size={15} />
+                    <span>Enlarge Repair Photo</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl bg-black/20 border border-white/5 text-[11px] text-slate-400 flex items-center gap-2">
+                  <ImageIcon size={14} className="text-slate-500" />
+                  <span>No repair photo attached to completion submission.</span>
+                </div>
+              )}
+
+              {/* Engineer Notes */}
+              <div className="p-3 rounded-xl bg-black/30 border border-white/5 space-y-1">
+                <span className="text-[10px] text-slate-400 uppercase font-semibold">Engineer Field Notes:</span>
+                <p className="text-xs text-slate-200 leading-relaxed">
+                  {complaint.engineerNotes || complaint.engineer_notes || "Field work executed and documented by assigned engineer."}
+                </p>
+              </div>
+
+              {/* Parts & Materials Used */}
+              {Array.isArray(complaint.partsUsed || complaint.parts_used) && (complaint.partsUsed || complaint.parts_used).length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  <span className="text-[10px] text-slate-400 uppercase font-semibold mr-1">Materials:</span>
+                  {(complaint.partsUsed || complaint.parts_used).map((part, i) => (
+                    <span key={i} className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-[10px] text-slate-300">
+                      {typeof part === 'string' ? part : `${part.name} (${part.qty || 1})`}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Section 7: Workflow Timeline */}
           <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-3">
             <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
               <Clock size={13} className="text-cyan-400" />

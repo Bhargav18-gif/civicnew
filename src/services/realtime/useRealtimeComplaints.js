@@ -7,9 +7,7 @@
  * 2. Engineer Field Operations: Receives real-time task assignments, reassignments,
  *    status updates, and department verification approvals.
  * 
- * Uses ONLY the centralized Supabase Realtime postgres_changes channel.
- * Manages clean subscription lifecycles, avoids duplicate cards, handles connection failures,
- * and maintains accurate live connection status.
+ * Uses Supabase Realtime postgres_changes channels with fallback polling & visibility sync.
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -23,15 +21,54 @@ export const REALTIME_STATUS = Object.freeze({
   ERROR: "ERROR"
 });
 
+function matchesDepartment(row, targetDept) {
+  if (!targetDept || targetDept === "all") return true;
+  if (!row) return false;
+
+  const target = String(targetDept).toLowerCase().trim();
+  const candidates = [
+    row.department_id,
+    row.departmentId,
+    row.department,
+    row.routing?.departmentId,
+    row.assignedDepartment,
+    row.category,
+    row.issue?.category
+  ].filter(Boolean).map(s => String(s).toLowerCase().trim());
+
+  return candidates.some(c => c === target || c.includes(target) || target.includes(c));
+}
+
+function matchesEngineer(row, engIdentifiers) {
+  if (!engIdentifiers || engIdentifiers.length === 0) return true;
+  if (!row) return false;
+
+  const idList = engIdentifiers.map(id => String(id).toLowerCase().trim());
+  const rowEngIds = [
+    row.assigned_engineer_id,
+    row.assignedEngineerId,
+    row.assignedTo,
+    row.assignment?.engineerId,
+    row.engineer_id,
+    row.engineerId,
+    row.assignedEngineerEmail,
+    row.assigned_engineer_email
+  ].filter(Boolean).map(s => String(s).toLowerCase().trim());
+
+  return rowEngIds.some(eid => idList.includes(eid));
+}
+
 export function useRealtimeComplaints({
   role = "department",
   departmentId = null,
   engineerId = null,
+  engineerIds = [],
   onInsert,
   onUpdate,
   onDelete,
   onMediaInsert,
-  onSync
+  onSync,
+  autoSyncIntervalMs = 20000 // 20s background sync safeguard
 }) {
   const [connectionStatus, setConnectionStatus] = useState(
     isSupabaseConfigured ? REALTIME_STATUS.CONNECTING : REALTIME_STATUS.DISCONNECTED
@@ -45,7 +82,12 @@ export function useRealtimeComplaints({
   });
 
   const normalizedDeptId = departmentId ? String(departmentId).toLowerCase() : null;
-  const normalizedEngId  = engineerId ? String(engineerId) : null;
+  const engIdList = [
+    engineerId,
+    ...(Array.isArray(engineerIds) ? engineerIds : [engineerIds])
+  ].filter(Boolean);
+
+  const engIdKey = engIdList.map(String).sort().join("_");
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -57,14 +99,13 @@ export function useRealtimeComplaints({
     let isSubscribed = true;
 
     // Unique channel identifier scoped by role and active context
-    const channelId = `realtime_${role}_${normalizedDeptId || 'all'}_${normalizedEngId || 'all'}_${Date.now()}`;
+    const channelId = `realtime_${role}_${normalizedDeptId || 'all'}_${engIdKey || 'all'}_${Date.now()}`;
 
     try {
       setConnectionStatus(REALTIME_STATUS.CONNECTING);
-
       channel = supabase.channel(channelId);
 
-      // ─── Listen to Postgres changes on complaints table ─────────────────────
+      // ─── 1. Listen to Postgres changes on complaints table ─────────────────
       channel.on(
         "postgres_changes",
         {
@@ -82,15 +123,10 @@ export function useRealtimeComplaints({
 
           // ─── Department Role Scoping ───
           if (role === "department") {
-            const matchesDept = normalizedDeptId && (
-              (normalizedNew?.departmentId && String(normalizedNew.departmentId).toLowerCase() === normalizedDeptId) ||
-              (normalizedNew?.department_id && String(normalizedNew.department_id).toLowerCase() === normalizedDeptId) ||
-              (normalizedOld?.departmentId && String(normalizedOld.departmentId).toLowerCase() === normalizedDeptId) ||
-              (normalizedOld?.department_id && String(normalizedOld.department_id).toLowerCase() === normalizedDeptId)
-            );
+            const matchesNew = matchesDepartment(normalizedNew || newRow, normalizedDeptId);
+            const matchesOld = matchesDepartment(normalizedOld || oldRow, normalizedDeptId);
 
-            // If department user and event belongs to another department, ignore
-            if (normalizedDeptId && !matchesDept) {
+            if (!matchesNew && !matchesOld) {
               return;
             }
 
@@ -105,17 +141,9 @@ export function useRealtimeComplaints({
 
           // ─── Engineer Role Scoping ───
           else if (role === "engineer") {
-            const isAssignedToThisEngineer = normalizedEngId && (
-              normalizedNew?.assignedEngineerId === normalizedEngId ||
-              normalizedNew?.assigned_engineer_id === normalizedEngId
-            );
+            const isAssignedToThisEngineer = matchesEngineer(normalizedNew || newRow, engIdList);
+            const wasAssignedToThisEngineer = matchesEngineer(normalizedOld || oldRow, engIdList);
 
-            const wasAssignedToThisEngineer = normalizedEngId && (
-              normalizedOld?.assignedEngineerId === normalizedEngId ||
-              normalizedOld?.assigned_engineer_id === normalizedEngId
-            );
-
-            // If event involves this engineer (either newly assigned, updated, or reassigned away)
             if (isAssignedToThisEngineer || wasAssignedToThisEngineer) {
               if (eventType === "INSERT" && normalizedNew) {
                 callbacksRef.current.onInsert?.(normalizedNew);
@@ -140,7 +168,7 @@ export function useRealtimeComplaints({
         }
       );
 
-      // ─── Listen to Postgres changes on complaint_media table ────────────────
+      // ─── 2. Listen to Postgres changes on complaint_media table ────────────
       channel.on(
         "postgres_changes",
         {
@@ -153,11 +181,13 @@ export function useRealtimeComplaints({
           setLastEventAt(new Date());
           if (payload.new) {
             callbacksRef.current.onMediaInsert?.(payload.new);
+            // Trigger auto sync to refresh full media and complaint state
+            callbacksRef.current.onSync?.();
           }
         }
       );
 
-      // ─── Channel Subscription Status Handling ──────────────────────────────
+      // ─── 3. Channel Subscription Status Handling ──────────────────────────
       channel.subscribe((status, err) => {
         if (!isSubscribed) return;
 
@@ -175,16 +205,35 @@ export function useRealtimeComplaints({
       setConnectionStatus(REALTIME_STATUS.ERROR);
     }
 
+    // ─── 4. Periodic Sync Safeguard & Window Focus Sync ─────────────────────
+    let syncTimer = null;
+    if (autoSyncIntervalMs > 0) {
+      syncTimer = setInterval(() => {
+        if (isSubscribed) {
+          callbacksRef.current.onSync?.();
+        }
+      }, autoSyncIntervalMs);
+    }
+
+    const handleFocus = () => {
+      if (isSubscribed) {
+        callbacksRef.current.onSync?.();
+      }
+    };
+    window.addEventListener("focus", handleFocus);
+
     // ─── Cleanup on Unmount / Target Change ──────────────────────────────────
     return () => {
       isSubscribed = false;
+      if (syncTimer) clearInterval(syncTimer);
+      window.removeEventListener("focus", handleFocus);
       if (channel) {
         supabase.removeChannel(channel).catch((err) => {
           console.warn("[REALTIME] Clean unsubscribe failed:", err.message);
         });
       }
     };
-  }, [role, normalizedDeptId, normalizedEngId]);
+  }, [role, normalizedDeptId, engIdKey, autoSyncIntervalMs]);
 
   const reconnect = useCallback(() => {
     setConnectionStatus(REALTIME_STATUS.CONNECTING);

@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CivicConnect — Complete UI Screenshots Gallery</title>
+  <style>
+    :root {
+      --bg: #070b14;
+      --card-bg: #0d1527;
+      --border: rgba(255, 255, 255, 0.08);
+      --accent: #38bdf8;
+      --accent-teal: #2dd4bf;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.5;
+      padding: 30px 20px;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    header {
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 35px 30px;
+      margin-bottom: 30px;
+      box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5);
+    }
+
+    .header-sub {
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 0.85rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .header-title {
+      font-size: 2.2rem;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 12px;
+      background: linear-gradient(to right, #ffffff, #93c5fd);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .header-desc {
+      color: var(--text-muted);
+      font-size: 1rem;
+      max-width: 800px;
+      margin-bottom: 20px;
+    }
+
+    .quick-stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .stat-pill {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #cbd5e1;
+    }
+
+    .nav-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 30px;
+      position: sticky;
+      top: 15px;
+      z-index: 100;
+      background: rgba(7, 11, 20, 0.85);
+      backdrop-filter: blur(12px);
+      padding: 10px 14px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+    }
+
+    .nav-btn {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      padding: 8px 16px;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .nav-btn:hover, .nav-btn.active {
+      background: var(--accent);
+      color: #000;
+      border-color: var(--accent);
+    }
+
+    .gallery-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 40px;
+    }
+
+    .gallery-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+      scroll-margin-top: 80px;
+      transition: border-color 0.2s;
+    }
+
+    .gallery-card:hover {
+      border-color: rgba(56, 189, 248, 0.4);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .card-header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 8px;
+    }
+
+    .badge-index {
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+
+    .badge-cat {
+      background: rgba(45, 212, 191, 0.15);
+      color: var(--accent-teal);
+      border: 1px solid rgba(45, 212, 191, 0.3);
+    }
+
+    .route-tag {
+      font-size: 0.8rem;
+      color: #94a3b8;
+    }
+
+    .route-tag code {
+      background: rgba(0, 0, 0, 0.4);
+      padding: 2px 6px;
+      border-radius: 6px;
+      color: #38bdf8;
+      font-family: monospace;
+    }
+
+    .open-btn {
+      font-size: 0.8rem;
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 8px;
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      transition: all 0.2s;
+    }
+
+    .open-btn:hover {
+      background: var(--accent);
+      color: #000;
+    }
+
+    .card-title {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 6px;
+    }
+
+    .card-desc {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      margin-bottom: 18px;
+    }
+
+    .image-wrapper {
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: #020617;
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
+    }
+
+    .image-wrapper img {
+      width: 100%;
+      height: auto;
+      display: block;
+      transition: transform 0.3s ease;
+    }
+
+    .image-wrapper:hover img {
+      transform: scale(1.008);
+    }
+
+    .card-footer {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 14px;
+      font-size: 0.78rem;
+      color: #64748b;
+    }
+
+    .card-footer code {
+      color: #94a3b8;
+    }
+
+    @media print {
+      body { background: #fff; color: #000; padding: 0; }
+      .nav-tabs, .open-btn { display: none; }
+      .gallery-card { page-break-after: always; border: 1px solid #ccc; background: #fff; color: #000; }
+      .card-title { color: #000; }
+      .header-title { background: none; -webkit-text-fill-color: #000; color: #000; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-sub">CivicConnect Visual UI Specification</div>
+      <h1 class="header-title">All 15 Pages & Dashboards Screenshot Catalog</h1>
+      <p class="header-desc">
+        Complete high-resolution screenshot documentation of every public screen, authentication portal, citizen interface, and role-based operational dashboard.
+      </p>
+      <div class="quick-stats">
+        <div class="stat-pill">✨ 15 Full Pages Captured</div>
+        <div class="stat-pill">👥 4 Core Roles (Citizen, Dept, Engineer, Admin)</div>
+        <div class="stat-pill">⚡ Supabase Real-Time Synchronized</div>
+        <div class="stat-pill">📱 Mobile & Desktop Viewport Ready</div>
+      </div>
+    </header>
+
+    <div class="nav-tabs">
+      <button class="nav-btn active" onclick="filterCat('ALL')">All Pages (15)</button>
+      <button class="nav-btn" onclick="filterCat('Public Portal')">Public (3)</button>
+      <button class="nav-btn" onclick="filterCat('Authentication')">Auth (4)</button>
+      <button class="nav-btn" onclick="filterCat('Citizen Module')">Citizen (2)</button>
+      <button class="nav-btn" onclick="filterCat('Department Module')">Department (1)</button>
+      <button class="nav-btn" onclick="filterCat('Engineer Module')">Engineer (1)</button>
+      <button class="nav-btn" onclick="filterCat('Admin Module')">Admin (4)</button>
+    </div>
+
+    <main class="gallery-grid">
+      
+      <section class="gallery-card" id="screenshot-1" data-category="Public Portal">
+        <div class="card-header">
+          <div class="card-header-left">
+            <span class="badge badge-index">#01</span>
+            <span class="badge badge-cat">Public Portal</span>
+            <span class="route-tag">Route: <code>/</code></span>
+          </div>
+          <a href="./screenshots/01_Landing_Page.png" target="_blank" class="open-btn">Open Image ↗</a>
+        </div>
+        <h2 class="card-title">Public Landing & Portal Entry</h2>
+        <p class="card-desc">Public landing hero banner, live municipal performance statistics, real-time activity stream, and navigation entry points.</p>
+        <div class="image-wrapper">
+          <a href="./screenshots/01_Landing_Page.png" target="_blank" title="Click to view high-resolution screenshot">
+            <img src="./screenshots/01_Landing_Page.png" alt="Public Landing & Portal Entry" loading="lazy" />
+          </a>
+        </div>
+        <div class="card-footer">
+          <span>File: <code>01_Landing_Page.png</code></span>
+          <span>CivicConnect Municipal System</span>
+        </div>
+      </section>
+    
+
+      <section class="gallery-card" id="screenshot-2" data-category="Authentication">
+        <div class="card-header">
+          <div class="card-header-left">
+            <span class="badge badge-index">#02</span>
+            <span class="badge badge-cat">Authentication</span>
+            <span class="route-tag">Route: <code>/login</code></span>
+          </div>
+          <a href="./screenshots/02_Citizen_Login_Page.png" target="_blank" class="open-btn">Open Image ↗</a>
+        </div>
+        <h2 class="card-title">Citizen Authentication & Login</h2>
+        <p class="card-desc">Secure resident login portal with Firebase Auth email/password, Google OAuth, and automatic profile resolution.</p>
+        <div class="image-wrapper">
+          <a href="./screenshots/02_Citizen_Login_Page.png" target="_blank" title="Click to view high-resolution screenshot">
+            <img src="./screenshots/02_Citizen_Login_Page.png" alt="Citizen Authentication & Login" loading="lazy" />
+          </a>
+        </div>
+        <div class="card-footer">
+          <span>File: <code>02_Citizen_Login_Page.png</code></span>
+          <span>CivicConnect Municipal System</span>
+        </div>
+      </section>
+    
+
+      <section class="gallery-card" id="screenshot-3" data-category="Authentication">
+        <div class="card-header">
+          <div class="card-header-left">
+            <span class="badge badge-index">#03</span>
+            <span class="badge badge-cat">Authentication</span>
+            <span class="route-tag">Route: <code>/admin/login</code></span>
+          </div>
+          <a href="./screenshots/03_Admin_Login_Portal.png" target="_blank" class="open-btn">Open Image ↗</a>
+        </div>
+        <h2 class="card-title">Restricted Administrator Login</h2>
+        <p class="card-desc">Hardened administrative access portal requiring verified database admin role claims.</p>
+        <div class="image-wrapper">
+          <a href="./screenshots/03_Admin_Login_Portal.png" target="_blank" title="Click to view high-resolution screenshot">
+            <img src="./screenshots/03_Admin_Login_Portal.png" alt="Restricted Administrator Login" loading="lazy" />
+          </a>
+        </div>
+        <div class="card-footer">
+          <span>File: <code>03_Admin_Login_Portal.png</code></span>
+          <span>CivicConnect Municipal System</span>
+        </div>
+      </section>
+    
+
+      <section class="gallery-card" id="screenshot-4" data-category="Authentication">
+        <div class="card-header">
+          <div class="card-header-left">
+            <span class="badge badge-index">#04</span>
+            <span class="badge badge-cat">Authentication</span>
+            <span class="route-tag">Route: <code>/register</code></span>
+          </div>
+          <a href="./screenshots/04_Registration_Page.png" target="_blank" class="open-btn">Open Image ↗</a>
+        </div>
+        <h2 class="card-title">Citizen Registration & Onboarding</h2>
+        <p class="card-desc">Resident account creation with immediate profile auto-sync to PostgreSQL database.</p>
+        <div class="image-wrapper">
+          <a href="./screenshots/04_Registration_Page.png" target="_blank" title="Click to view high-resolution screenshot">
+            <img src="./screenshots/04_Registration_Page.png" alt="Citizen Registration & Onboarding" loading="lazy" />
+          </a>
+        </div>
+        <div class="card-footer">
+          <span>File: <code>04_Registration_Page.png</code></span>
+          <span>CivicConnect Municipal System</span>
+        </div>
+      </section>
+    
+
+      <section class="gallery-card" id="screenshot-5" data-category="Authentication">
+        <div class="card-header">
+          <div class="card-header-left">
+            <span class="badge badge-index">#05</span>
+            <span class="badge badge-cat">Authentication</span>
+            <span class="route-tag">Route: <code>/forgot-password</code></span>
+          </div>
+          <a href="./screenshots/05_Forgot_Password_Page.png" target="_blank" class="open-btn">Open Image ↗</a>
+        </div>
+        <h2 class="card-title">Password Recovery & Security Reset</h2>
+        <p class="card-desc">Self-service cryptographic password recovery email dispatch interface.</p>
+        <div class="image-wrapper">
+          <a href="./screenshots/05_Forgot_Password_Page.png" target="_blank" title="Click to view high-resolution screenshot">
+            <img src="./screenshots/05_Forgot_Password_Page.png" alt="Password Recovery & Security Reset" loading="lazy" />
+          </a>
+        </div>
+        <div class="card-footer">
+          <span>File: <code>05_Forgot_Password_Page.png</code></span>
+          <span>CivicConnect Municipal System</span>
+        </div>
+      </section>
+    
+
+      <section class="gallery-card" id="screenshot-6" data-category="Public Portal">
+        <div class="card-header">
+          <div class="card-header-left">
+            <span class="badge badge-index">#06</span>
+            <span class="badge badge-cat">Public Portal</span>
+            <span class="route-tag">Route: <code>/public-dashboard</code></span>
+          </div>
+          <a href="./screenshots/06_Public_Live_Dashboard.png" target="_blank" class="open-btn">Open Image ↗</a>
+        </div>
+        <h2 class="card-title">Public Transparency & City Map</h2>
+        <p class="card-desc">City-wide open data map, ward-level resolution analytics, and public municipal accountability metrics.</p>
+        <div class="image-wrapper">
+          <a href="./screenshots/06_Public_Live_Dashboard.png" target="_blank" title="Click to view high-resolution screenshot">
+            <img src="./screenshots/06_Public_Live_Dashboard.png" alt="Public Transparency & City Map" loading="lazy" />
+          </a>
+        </div>
+        <div class="card-footer">
+          <span>File: <code>06_Public_Live_Dashboard.png</code></span>
+          <span>CivicConnect Municipal System</span>
+        </div>
+      </section>
+    
+
+      <section class="gallery-card" id="screenshot-7" data-category="Public Portal">
+        <div class="card-header">
+          <div class="card-header-left">
+            <span class="badge badge-index">#07</span>
+            <span class="badge badge-cat">Public Portal</span>
+            <span class="route-tag">Route: <code>/track</code></span>
+          </div>
+          <a href="./screenshots/07_Public_Track_Complaint.png" target="_blank" class="open-btn">Open Image ↗</a>
+        </div>
+        <h2 class="card-title">Public Grievance Reference Tracker</h2>
+        <p class="card-desc">Public complaint tracking by reference ID (e.g. CC-2026-X8B9Q) with live workflow stage progression.</p>
+        <div class="image-wrapper">
+          <a href="./screenshots/07_Public_Track_Complaint.png" target="_blank" title="Click to view high-resolution screenshot">
+            <img src="./screenshots/07_Public_Track_Complaint.png" alt="Public Grievance Reference Tracker" loading="lazy" />
+          </a>
+        </div>
+        <div class="card-footer">
+          <span>File: <code>07_Public_Track_Complaint.png</code></span>
+          <span>CivicConnect Municipal System</span>
+        </div>
+      </section>
+    
+
+      <section class="gallery-card" id="screenshot-8" data-category="Citizen Module">
+        <div class="card-header">
+          <div class="card-header-left">
+            <span class="badge badge-index">#08</span>
+            <span class="badge badge-cat">Citizen Module</span>
+            <span class="route-tag">Route: <code>/dashboard</code></span>
+          </div>
+          <a href="./screenshots/08_Citizen_Dashboard.png" target="_blank" class="open-btn">Open Image ↗</a>
+        </div>
+        <h2 class="card-title">Citizen Personal Grievance Dashboard</h2>
+        <p class="card-desc">Resident active tickets, resolution history, status badges, and feedback triggers.</p>
+        <div class="image-wrapper">
+          <a href="./screenshots/08_Citizen_Dashboard.png" target="_blank" title="Click to view high-resolution screenshot">
+            <img src="./screenshots/08_Citizen_Dashboard.png" alt="Citizen Personal Grievance Dashboard" loading="lazy" />
+          </a>
+        </div>
+        <div class="card-footer">
+          <span>File: <code>08_Citizen_Dashboard.png</code></span>
+          <span>CivicConnect Municipal System</span>
+        </div>
+      </section>
+    
+
+      <section class="gallery-card" id="screenshot-9" data-category="Citizen Module">
+        <div class="card-header">
+          <div class="card-header-left">
+            <span class="badge badge-index">#09</span>
+            <span class="badge badge-cat">Citizen Module</span>
+            <span class="route-tag">Route: <code>/report</code></span>
+          </div>
+          <a href="./screenshots/09_Citizen_Report_Issue.png" target="_blank" class="open-btn">Open Image ↗</a>
+        </div>
+        <h2 class="card-title">Citizen Geotagged Complaint Lodging Form</h2>
+        <p class="card-desc">Geotagged issue submission with photo evidence upload, category selection, and AI triage routing pipeline.</p>
+        <div class="image-wrapper">
+          <a href="./screenshots/09_Citizen_Report_Issue.png" target="_blank" title="Click to view high-resolution screenshot">
+            <img src="./screenshots/09_Citizen_Report_Issue.png" alt="Citizen Geotagged Complaint Lodging Form" loading="lazy" />
+          </a>
+        </div>
+        <div class="card-footer">
+          <span>File: <code>09_Citizen_Report_Issue.png</code></span>
+          <span>CivicConnect Municipal System</span>
+        </div>
+      </section>
+    
+
+      <section class="gallery-card" id="screenshot-10" data-category="Department Module">
+        <div class="card-header">
+          <div class="card-header-left">
+            <span class="badge badge-index">#10</span>
+            <span class="badge badge-cat">Department Module</span>
+            <span class="route-tag">Route: <code>/department/dashboard</code></span>
+          </div>
+          <a href="./screenshots/10_Department_Coordinator_Dashboard.png" target="_blank" class="open-btn">Open Image ↗</a>
+        </div>
+        <h2 class="card-title">Department Coordinator Operations Center</h2>
+        <p class="card-desc">Department queue (Roads), SLA countdown timers, engineer dispatch rosters, and resolution audits with live Supabase sync.</p>
+        <div class="image-wrapper">
+          <a href="./screenshots/10_Department_Coordinator_Dashboard.png" target="_blank" title="Click to view high-resolution screenshot">
+            <img src="./screenshots/10_Department_Coordinator_Dashboard.png" alt="Department Coordinator Operations Center" loading="lazy" />
+          </a>
+        </div>
+        <div class="card-footer">
+          <span>File: <code>10_Department_Coordinator_Dashboard.png</code></span>
+          <span>CivicConnect Municipal System</span>
+        </div>
+      </section>
+    
+
+      <section class="gallery-card" id="screenshot-11" data-category="Engineer Module">
+        <div class="card-header">
+          <div class="card-header-left">
+            <span class="badge badge-index">#11</span>
+            <span class="badge badge-cat">Engineer Module</span>
+            <span class="route-tag">Route: <code>/engineer/dashboard</code></span>
+          </div>
+          <a href="./screenshots/11_Field_Operations_Engineer_Dashboard.png" target="_blank" class="open-btn">Open Image ↗</a>
+        </div>
+        <h2 class="card-title">Field Operations Engineer Work Order Center</h2>
+        <p class="card-desc">Mobile-first work order queue, state progressions (En Route -> On Site -> Fix Proof), and repair evidence submission.</p>
+        <div class="image-wrapper">
+          <a href="./screenshots/11_Field_Operations_Engineer_Dashboard.png" target="_blank" title="Click to view high-resolution screenshot">
+            <img src="./screenshots/11_Field_Operations_Engineer_Dashboard.png" alt="Field Operations Engineer Work Order Center" loading="lazy" />
+          </a>
+        </div>
+        <div class="card-footer">
+          <span>File: <code>11_Field_Operations_Engineer_Dashboard.png</code></span>
+          <span>CivicConnect Municipal System</span>
+        </div>
+      </section>
+    
+
+      <section class="gallery-card" id="screenshot-12" data-category="Admin Module">
+        <div class="card-header">
+          <div class="card-header-left">
+            <span class="badge badge-index">#12</span>
+            <span class="badge badge-cat">Admin Module</span>
+            <span class="route-tag">Route: <code>/admin/dashboard</code></span>
+          </div>
+          <a href="./screenshots/12_Admin_Master_Dashboard.png" target="_blank" class="open-btn">Open Image ↗</a>
+        </div>
+        <h2 class="card-title">Administrator Command & Triage Dashboard</h2>
+        <p class="card-desc">City-wide performance overview, AI exception review queue, and global activity monitor.</p>
+        <div class="image-wrapper">
+          <a href="./screenshots/12_Admin_Master_Dashboard.png" target="_blank" title="Click to view high-resolution screenshot">
+            <img src="./screenshots/12_Admin_Master_Dashboard.png" alt="Administrator Command & Triage Dashboard" loading="lazy" />
+          </a>
+        </div>
+        <div class="card-footer">
+          <span>File: <code>12_Admin_Master_Dashboard.png</code></span>
+          <span>CivicConnect Municipal System</span>
+        </div>
+      </section>
+    
+
+      <section class="gallery-card" id="screenshot-13" data-category="Admin Module">
+        <div class="card-header">
+          <div class="card-header-left">
+            <span class="badge badge-index">#13</span>
+            <span class="badge badge-cat">Admin Module</span>
+            <span class="route-tag">Route: <code>/admin/complaints</code></span>
+          </div>
+          <a href="./screenshots/13_Admin_Complaints_Management.png" target="_blank" class="open-btn">Open Image ↗</a>
+        </div>
+        <h2 class="card-title">Global Complaints & SLA Management</h2>
+        <p class="card-desc">System-wide complaint registry with manual department routing and SLA escalation overrides.</p>
+        <div class="image-wrapper">
+          <a href="./screenshots/13_Admin_Complaints_Management.png" target="_blank" title="Click to view high-resolution screenshot">
+            <img src="./screenshots/13_Admin_Complaints_Management.png" alt="Global Complaints & SLA Management" loading="lazy" />
+          </a>
+        </div>
+        <div class="card-footer">
+          <span>File: <code>13_Admin_Complaints_Management.png</code></span>
+          <span>CivicConnect Municipal System</span>
+        </div>
+      </section>
+    
+
+      <section class="gallery-card" id="screenshot-14" data-category="Admin Module">
+        <div class="card-header">
+          <div class="card-header-left">
+            <span class="badge badge-index">#14</span>
+            <span class="badge badge-cat">Admin Module</span>
+            <span class="route-tag">Route: <code>/admin/users</code></span>
+          </div>
+          <a href="./screenshots/14_Admin_User_Access_Control.png" target="_blank" class="open-btn">Open Image ↗</a>
+        </div>
+        <h2 class="card-title">Role-Based Access Control (RBAC) User Management</h2>
+        <p class="card-desc">User management table for assigning Citizen, Engineer, Department, and Admin roles with activation toggle.</p>
+        <div class="image-wrapper">
+          <a href="./screenshots/14_Admin_User_Access_Control.png" target="_blank" title="Click to view high-resolution screenshot">
+            <img src="./screenshots/14_Admin_User_Access_Control.png" alt="Role-Based Access Control (RBAC) User Management" loading="lazy" />
+          </a>
+        </div>
+        <div class="card-footer">
+          <span>File: <code>14_Admin_User_Access_Control.png</code></span>
+          <span>CivicConnect Municipal System</span>
+        </div>
+      </section>
+    
+
+      <section class="gallery-card" id="screenshot-15" data-category="Admin Module">
+        <div class="card-header">
+          <div class="card-header-left">
+            <span class="badge badge-index">#15</span>
+            <span class="badge badge-cat">Admin Module</span>
+            <span class="route-tag">Route: <code>/admin/ai-config</code></span>
+          </div>
+          <a href="./screenshots/15_Admin_AI_Model_Configuration.png" target="_blank" class="open-btn">Open Image ↗</a>
+        </div>
+        <h2 class="card-title">AI Classification & Model Configuration</h2>
+        <p class="card-desc">AI confidence thresholds, Gemini LLM router prompts, and fallback manual review rules.</p>
+        <div class="image-wrapper">
+          <a href="./screenshots/15_Admin_AI_Model_Configuration.png" target="_blank" title="Click to view high-resolution screenshot">
+            <img src="./screenshots/15_Admin_AI_Model_Configuration.png" alt="AI Classification & Model Configuration" loading="lazy" />
+          </a>
+        </div>
+        <div class="card-footer">
+          <span>File: <code>15_Admin_AI_Model_Configuration.png</code></span>
+          <span>CivicConnect Municipal System</span>
+        </div>
+      </section>
+    
+    </main>
+  </div>
+
+  <script>
+    function filterCat(cat) {
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+      event.target.classList.add('active');
+
+      document.querySelectorAll('.gallery-card').forEach(card => {
+        if (cat === 'ALL' || card.getAttribute('data-category') === cat) {
+          card.style.display = 'block';
+        } else {
+          card.style.display = 'none';
+        }
+      });
+    }
+  </script>
+</body>
+</html>

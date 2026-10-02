@@ -4,6 +4,7 @@ import { useAuth } from "../../context/AuthContext.jsx";
 import { engineerApi } from "../../services/api/engineerApi.js";
 import { normalizeComplaintDoc } from "../../utils/complaintSchema.js";
 import { WORKFLOW_STATES, STATUS_META, PRIORITY_LEVELS, ROLES } from "../../constants/workflow.js";
+import { getDepartmentInfo } from "../../constants/departments.js";
 import { calculateDistanceMeters, formatDistance, getDeviceLocation, getDirectionsUrl } from "../../utils/geo.js";
 import StatusBadge from "../../components/ui/StatusBadge.jsx";
 import OpsLayout from "../../components/layout/OpsLayout.jsx";
@@ -41,9 +42,9 @@ import {
 
 const PRIORITY_STYLES = {
   CRITICAL: "bg-red-500/20 text-red-300 border-red-500/30",
-  HIGH:     "bg-orange-500/20 text-orange-300 border-orange-500/30",
-  MEDIUM:   "bg-amber-500/20 text-amber-300 border-amber-500/30",
-  LOW:      "bg-slate-700 text-slate-300 border-slate-600",
+  HIGH: "bg-orange-500/20 text-orange-300 border-orange-500/30",
+  MEDIUM: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+  LOW: "bg-slate-700 text-slate-300 border-slate-600",
 };
 
 export default function EngineerDashboard() {
@@ -53,31 +54,33 @@ export default function EngineerDashboard() {
   const [activeTab, setActiveTab] = useState("dashboard");
 
   // ── Data State ───────────────────────────────────────────────────────────
-  const [tasks, setTasks]           = useState([]);
-  const [loading, setLoading]       = useState(true);
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError]           = useState("");
+  const [error, setError] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
 
   // ── Live Device Location State ───────────────────────────────────────────
-  const [deviceGps, setDeviceGps]   = useState(null);
+  const [deviceGps, setDeviceGps] = useState(null);
 
   // ── Search & Filter State ─────────────────────────────────────────────────
-  const [searchQuery, setSearchQuery]       = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [filterPriority, setFilterPriority] = useState("ALL");
-  const [sortBy, setSortBy]                 = useState("PRIORITY");
+  const [sortBy, setSortBy] = useState("PRIORITY");
 
   // ── Modals & Drawers ──────────────────────────────────────────────────────
-  const [selectedTask, setSelectedTask]           = useState(null);
+  const [selectedTask, setSelectedTask] = useState(null);
   const [reportComplaintId, setReportComplaintId] = useState(null);
 
   const engineerName = user?.name || "Field Engineer";
+  const userDept = user?.departmentId || user?.department_id || user?.department || "roads";
+  const deptInfo = useMemo(() => getDepartmentInfo(userDept), [userDept]);
 
   // ── Retrieve device GPS on mount ─────────────────────────────────────────
   useEffect(() => {
     getDeviceLocation()
       .then(loc => setDeviceGps(loc))
-      .catch(() => {}); // Non-blocking optional enhancement
+      .catch(() => { }); // Non-blocking optional enhancement
   }, []);
 
   // ── Load tasks from Supabase ─────────────────────────────────────────────
@@ -104,39 +107,60 @@ export default function EngineerDashboard() {
     loadTasks();
   }, [loadTasks]);
 
-  const engineerSupabaseId = user?.supabaseId || user?.id;
+  const engIdentifiers = useMemo(() => {
+    return [user?.supabaseId, user?.id, user?.uid, user?.email].filter(Boolean);
+  }, [user]);
+
+  const isAssignedToMe = useCallback((task) => {
+    if (!task) return false;
+    const taskEngIds = [
+      task.assignedEngineerId,
+      task.assigned_engineer_id,
+      task.assignedTo,
+      task.assignment?.engineerId,
+      task.engineer_id,
+      task.engineerId,
+      task.assignedEngineerEmail,
+      task.assigned_engineer_email
+    ].filter(Boolean).map(s => String(s).toLowerCase());
+
+    return engIdentifiers.some(id => taskEngIds.includes(String(id).toLowerCase()));
+  }, [engIdentifiers]);
 
   // ── Real-Time Supabase Synchronization ────────────────────────────────────
   const handleRealtimeInsert = useCallback((newTask) => {
+    const norm = normalizeComplaintDoc(newTask);
+    if (!isAssignedToMe(norm)) return;
+
     setTasks((prev) => {
-      const exists = prev.some((t) => t.id === newTask.id || (t.refId && t.refId === newTask.refId));
+      const exists = prev.some((t) => t.id === norm.id || (t.refId && t.refId === norm.refId));
       if (exists) {
-        return prev.map((t) => (t.id === newTask.id || t.refId === newTask.refId ? { ...t, ...newTask } : t));
+        return prev.map((t) => (t.id === norm.id || t.refId === norm.refId ? { ...t, ...norm } : t));
       }
-      return [newTask, ...prev];
+      return [norm, ...prev];
     });
 
-    toast(`📋 New Task Assigned: ${newTask.trackingNumber || newTask.category || 'Complaint'}`, {
+    toast(`📋 New Task Assigned: ${norm.referenceId || norm.title || norm.category || 'Complaint'}`, {
       icon: "⚡",
       duration: 6000,
       style: { background: "#0c1220", color: "#2dd4bf", border: "1px solid rgba(45,212,191,0.3)" }
     });
-  }, []);
+  }, [isAssignedToMe]);
 
   const handleRealtimeUpdate = useCallback((updatedTask) => {
-    const isStillAssignedToMe = (
-      updatedTask.assignedEngineerId === engineerSupabaseId ||
-      updatedTask.assigned_engineer_id === engineerSupabaseId
-    );
+    const norm = normalizeComplaintDoc(updatedTask);
+    const isStillAssignedToMe = isAssignedToMe(norm);
 
     if (isStillAssignedToMe) {
-      setTasks((prev) =>
-        prev.map((t) => (t.id === updatedTask.id ? { ...t, ...updatedTask } : t))
-      );
-      setSelectedTask((curr) => (curr && curr.id === updatedTask.id ? { ...curr, ...updatedTask } : curr));
+      setTasks((prev) => {
+        const exists = prev.some((t) => t.id === norm.id);
+        if (!exists) return [norm, ...prev];
+        return prev.map((t) => (t.id === norm.id ? { ...t, ...norm } : t));
+      });
+      setSelectedTask((curr) => (curr && curr.id === norm.id ? { ...curr, ...norm } : curr));
 
-      if (updatedTask.status === WORKFLOW_STATES.CLOSED || updatedTask.status === WORKFLOW_STATES.CITIZEN_VERIFICATION) {
-        toast(`✅ Work Approved: Task ${updatedTask.trackingNumber || ''} verified by department!`, {
+      if (norm.status === WORKFLOW_STATES.CLOSED || norm.status === WORKFLOW_STATES.CITIZEN_VERIFICATION) {
+        toast(`✅ Work Approved: Task ${norm.referenceId || norm.trackingNumber || ''} verified by department!`, {
           icon: "🎉",
           duration: 6000,
           style: { background: "#0c1220", color: "#34d399", border: "1px solid rgba(52,211,153,0.3)" }
@@ -144,24 +168,24 @@ export default function EngineerDashboard() {
       }
     } else {
       // Reassigned to another engineer — remove from local task list
-      setTasks((prev) => prev.filter((t) => t.id !== updatedTask.id));
-      setSelectedTask((curr) => (curr && curr.id === updatedTask.id ? null : curr));
-      toast(`ℹ️ Task ${updatedTask.trackingNumber || ''} was reassigned.`, {
+      setTasks((prev) => prev.filter((t) => t.id !== norm.id));
+      setSelectedTask((curr) => (curr && curr.id === norm.id ? null : curr));
+      toast(`ℹ️ Task ${norm.referenceId || norm.trackingNumber || ''} was reassigned.`, {
         icon: "🔄",
         duration: 4000,
         style: { background: "#0c1220", color: "#94a3b8", border: "1px solid rgba(148,163,184,0.2)" }
       });
     }
-  }, [engineerSupabaseId]);
+  }, [isAssignedToMe]);
 
   const handleRealtimeDelete = useCallback((deletedTask) => {
     setTasks((prev) => prev.filter((t) => t.id !== deletedTask.id));
     setSelectedTask((curr) => (curr && curr.id === deletedTask.id ? null : curr));
   }, []);
 
-  const { connectionStatus, reconnect } = useRealtimeComplaints({
+  const { connectionStatus, reconnect, isLive } = useRealtimeComplaints({
     role: "engineer",
-    engineerId: engineerSupabaseId,
+    engineerIds: engIdentifiers,
     onInsert: handleRealtimeInsert,
     onUpdate: handleRealtimeUpdate,
     onDelete: handleRealtimeDelete,
@@ -301,6 +325,7 @@ export default function EngineerDashboard() {
       role={ROLES.ENGINEER}
       activeTab={activeTab}
       onTabChange={setActiveTab}
+      departmentName={deptInfo.name}
       onRefresh={() => loadTasks(true)}
       refreshing={refreshing}
       notificationCount={stats.urgent}
@@ -320,13 +345,26 @@ export default function EngineerDashboard() {
               <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
               On Duty
             </span>
+            <span className={`hidden sm:inline-flex px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${deptInfo.badgeClass}`}>
+              {deptInfo.shortName} Division
+            </span>
           </div>
           <p className="text-sm text-slate-400 mt-1">
-            What work do you need to perform and where do you need to go today?
+            {deptInfo.tagline}
           </p>
         </div>
 
         <div className="flex items-center gap-3">
+          <div className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-xl bg-[#0c1322] border border-white/10 text-xs">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isLive ? 'bg-teal-400' : 'bg-amber-400'}`}></span>
+              <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isLive ? 'bg-teal-500' : 'bg-amber-500'}`}></span>
+            </span>
+            <span className="text-slate-300 font-medium">
+              {isLive ? "Live Realtime" : connectionStatus === "CONNECTING" ? "Connecting..." : "Live Synced"}
+            </span>
+          </div>
+
           <button
             onClick={() => setActiveTab("report")}
             className="px-4 py-2.5 rounded-xl bg-teal-400 hover:bg-teal-300 text-black text-xs font-bold flex items-center gap-1.5 shadow-[0_0_15px_-3px_rgba(45,212,191,0.4)] transition"

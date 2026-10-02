@@ -1,0 +1,115 @@
+[
+  {
+    "name": "Live Web Portal CDN (Single-Page App Entrypoint)",
+    "target": "https://civic-b6108.web.app",
+    "totalRequests": 100,
+    "concurrency": 25,
+    "durationSec": 2.126,
+    "rps": 47,
+    "successRate": 100,
+    "stats": {
+      "min": 51,
+      "p50": 156,
+      "p90": 1403,
+      "p95": 1617,
+      "p99": 2125,
+      "max": 2125,
+      "avg": 427
+    },
+    "totalBytesKb": 104.8
+  },
+  {
+    "name": "Backend Health & Engine Status API",
+    "target": "http://127.0.0.1:5177/api/health",
+    "totalRequests": 200,
+    "concurrency": 30,
+    "durationSec": 0.258,
+    "rps": 775.2,
+    "successRate": 100,
+    "stats": {
+      "min": 23,
+      "p50": 34,
+      "p90": 42,
+      "p95": 47,
+      "p99": 58,
+      "max": 58,
+      "avg": 35
+    },
+    "totalBytesKb": 301.6
+  },
+  {
+    "name": "Public Map Grievance Feed (PostgreSQL Geo Query)",
+    "target": "http://127.0.0.1:5177/api/public/map-complaints",
+    "totalRequests": 150,
+    "concurrency": 25,
+    "durationSec": 6.789,
+    "rps": 22.1,
+    "successRate": 100,
+    "stats": {
+      "min": 142,
+      "p50": 750,
+      "p90": 1750,
+      "p95": 1783,
+      "p99": 3407,
+      "max": 3410,
+      "avg": 920
+    },
+    "totalBytesKb": 575
+  },
+  {
+    "name": "Authenticated Department Queue (Scoping & Filtering)",
+    "target": "http://127.0.0.1:5177/api/departments/roads/complaints",
+    "totalRequests": 100,
+    "concurrency": 20,
+    "durationSec": 4.274,
+    "rps": 23.4,
+    "successRate": 100,
+    "stats": {
+      "min": 197,
+      "p50": 445,
+      "p90": 1375,
+      "p95": 2184,
+      "p99": 3664,
+      "max": 3664,
+      "avg": 659
+    },
+    "totalBytesKb": 3140
+  },
+  {
+    "name": "Transactional Grievance Ingestion (DB Writes)",
+    "target": "http://127.0.0.1:5177/api/complaints",
+    "totalRequests": 50,
+    "concurrency": 10,
+    "durationSec": 7.269,
+    "rps": 6.9,
+    "successRate": 100,
+    "stats": {
+      "min": 471,
+      "p50": 719,
+      "p90": 1928,
+      "p95": 2340,
+      "p99": 2980,
+      "max": 2980,
+      "avg": 1014
+    }
+  },
+  {
+    "name": "High-Concurrency Burst Stress Test (Simultaneous Spike)",
+    "target": "http://127.0.0.1:5177/api/health",
+    "totalRequests": 500,
+    "concurrency": 50,
+    "durationSec": 1.119,
+    "rps": 446.8,
+    "successRate": 100,
+    "stats": {
+      "min": 17,
+      "p50": 102,
+      "p90": 165,
+      "p95": 201,
+      "p99": 205,
+      "max": 208,
+      "avg": 108
+    },
+    "totalBytesKb": 753.9
+  }
+]

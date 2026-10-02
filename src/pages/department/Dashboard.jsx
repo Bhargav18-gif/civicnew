@@ -4,6 +4,7 @@ import { useAuth } from "../../context/AuthContext.jsx";
 import { departmentApi } from "../../services/api/departmentApi.js";
 import { normalizeComplaintDoc } from "../../utils/complaintSchema.js";
 import { WORKFLOW_STATES, STATUS_META, PRIORITY_LEVELS, PRIORITY_SLA_HOURS, ROLES } from "../../constants/workflow.js";
+import { getDepartmentInfo, DEPARTMENT_LIST } from "../../constants/departments.js";
 import StatusBadge from "../../components/ui/StatusBadge.jsx";
 import OpsLayout from "../../components/layout/OpsLayout.jsx";
 import ComplaintDetailDrawer from "../../components/department/ComplaintDetailDrawer.jsx";
@@ -83,6 +84,7 @@ export default function DepartmentDashboard() {
   const [actionLoading, setActionLoading]             = useState(false);
 
   const userDept = user?.departmentId || user?.department_id || user?.department || "roads";
+  const deptInfo = useMemo(() => getDepartmentInfo(userDept), [userDept]);
 
   // ── Data Loaders ──────────────────────────────────────────────────────────
   const loadEngineers = useCallback(async () => {
@@ -112,27 +114,8 @@ export default function DepartmentDashboard() {
         loadEngineers()
       ]);
 
-      // Calculate active and completed counts per engineer
-      const updatedEngList = engList.map(eng => {
-        const assignedComplaints = complaintList.filter(
-          c => (c.assignedEngineerId === eng.id || c.assigned_engineer_id === eng.id)
-        );
-        const activeCount = assignedComplaints.filter(c =>
-          [WORKFLOW_STATES.ASSIGNED, WORKFLOW_STATES.ACCEPTED_BY_ENGINEER, WORKFLOW_STATES.EN_ROUTE, WORKFLOW_STATES.ON_SITE, WORKFLOW_STATES.IN_PROGRESS].includes(c.status)
-        ).length;
-        const completedCount = assignedComplaints.filter(c =>
-          [WORKFLOW_STATES.VERIFICATION_PENDING, WORKFLOW_STATES.DEPARTMENT_REVIEW, WORKFLOW_STATES.CITIZEN_VERIFICATION, WORKFLOW_STATES.CLOSED].includes(c.status)
-        ).length;
-
-        return {
-          ...eng,
-          activeAssignments: activeCount,
-          completedAssignments: completedCount
-        };
-      });
-
-      setEngineers(updatedEngList);
-      setComplaints(complaintList);
+      setComplaints(complaintList || []);
+      if (engList) setEngineers(engList);
     } catch (err) {
       console.error("Failed to load department data:", err);
       setError("Unable to load department data from server. Please try again.");
@@ -147,19 +130,40 @@ export default function DepartmentDashboard() {
     loadComplaints();
   }, [loadComplaints]);
 
+  // ── Reactive Engineer Workload (Updates immediately on Real-Time complaint events) ──
+  const engineersWithStats = useMemo(() => {
+    return (engineers || []).map(eng => {
+      const assignedComplaints = complaints.filter(
+        c => (c.assignedEngineerId === eng.id || c.assigned_engineer_id === eng.id || c.assignedEngineerId === eng.firebase_uid || c.assigned_engineer_id === eng.firebase_uid)
+      );
+      const activeCount = assignedComplaints.filter(c =>
+        [WORKFLOW_STATES.ASSIGNED, WORKFLOW_STATES.ACCEPTED_BY_ENGINEER, WORKFLOW_STATES.EN_ROUTE, WORKFLOW_STATES.ON_SITE, WORKFLOW_STATES.IN_PROGRESS].includes(c.status)
+      ).length;
+      const completedCount = assignedComplaints.filter(c =>
+        [WORKFLOW_STATES.VERIFICATION_PENDING, WORKFLOW_STATES.DEPARTMENT_REVIEW, WORKFLOW_STATES.CITIZEN_VERIFICATION, WORKFLOW_STATES.CLOSED].includes(c.status)
+      ).length;
+
+      return {
+        ...eng,
+        activeAssignments: activeCount,
+        completedAssignments: completedCount
+      };
+    });
+  }, [engineers, complaints]);
+
   // ── Real-Time Supabase Synchronization ────────────────────────────────────
   const handleRealtimeInsert = useCallback((newComplaint) => {
+    const norm = normalizeComplaintDoc(newComplaint);
     setComplaints((prev) => {
-      // Check if complaint already exists to prevent duplicate entries
-      const exists = prev.some((c) => c.id === newComplaint.id || (c.refId && c.refId === newComplaint.refId));
+      const exists = prev.some((c) => c.id === norm.id || (c.refId && c.refId === norm.refId));
       if (exists) {
-        return prev.map((c) => (c.id === newComplaint.id || c.refId === newComplaint.refId ? { ...c, ...newComplaint } : c));
+        return prev.map((c) => (c.id === norm.id || c.refId === norm.refId ? { ...c, ...norm } : c));
       }
-      return [newComplaint, ...prev];
+      return [norm, ...prev];
     });
 
     const deptLabel = userDept ? userDept.toUpperCase() : "DEPARTMENT";
-    toast(`🔔 New complaint assigned to ${deptLabel}: ${newComplaint.trackingNumber || newComplaint.category || 'Complaint'}`, {
+    toast(`🔔 New live complaint routed to ${deptLabel}: ${norm.referenceId || norm.title || 'Complaint'}`, {
       icon: "📢",
       duration: 5000,
       style: { background: "#0c1220", color: "#38bdf8", border: "1px solid rgba(56,189,248,0.3)" }
@@ -167,18 +171,19 @@ export default function DepartmentDashboard() {
   }, [userDept]);
 
   const handleRealtimeUpdate = useCallback((updatedComplaint) => {
+    const norm = normalizeComplaintDoc(updatedComplaint);
     setComplaints((prev) =>
-      prev.map((c) => (c.id === updatedComplaint.id ? { ...c, ...updatedComplaint } : c))
+      prev.map((c) => (c.id === norm.id ? { ...c, ...norm } : c))
     );
 
     // If active drawer or modal complaint is updated, sync it live
-    setDetailComplaint((curr) => (curr && curr.id === updatedComplaint.id ? { ...curr, ...updatedComplaint } : curr));
-    setVerifyModalComplaint((curr) => (curr && curr.id === updatedComplaint.id ? { ...curr, ...updatedComplaint } : curr));
-    setAssignModalComplaint((curr) => (curr && curr.id === updatedComplaint.id ? { ...curr, ...updatedComplaint } : curr));
+    setDetailComplaint((curr) => (curr && curr.id === norm.id ? { ...curr, ...norm } : curr));
+    setVerifyModalComplaint((curr) => (curr && curr.id === norm.id ? { ...curr, ...norm } : curr));
+    setAssignModalComplaint((curr) => (curr && curr.id === norm.id ? { ...curr, ...norm } : curr));
 
     // Specific notifications for key transitions
-    if (updatedComplaint.status === WORKFLOW_STATES.VERIFICATION_PENDING) {
-      toast(`📋 Work completed for ${updatedComplaint.trackingNumber || 'task'} — Verification required`, {
+    if (norm.status === WORKFLOW_STATES.VERIFICATION_PENDING) {
+      toast(`📋 Work completed for ${norm.referenceId || norm.trackingNumber || 'task'} — Verification required`, {
         icon: "🛡️",
         duration: 5000,
         style: { background: "#0c1220", color: "#a78bfa", border: "1px solid rgba(167,139,250,0.3)" }
@@ -191,7 +196,7 @@ export default function DepartmentDashboard() {
     setDetailComplaint((curr) => (curr && curr.id === deletedComplaint.id ? null : curr));
   }, []);
 
-  const { connectionStatus, reconnect } = useRealtimeComplaints({
+  const { connectionStatus, reconnect, isLive, lastEventAt } = useRealtimeComplaints({
     role: "department",
     departmentId: userDept,
     onInsert: handleRealtimeInsert,
@@ -352,7 +357,7 @@ export default function DepartmentDashboard() {
       role={ROLES.DEPARTMENT}
       activeTab={activeTab}
       onTabChange={setActiveTab}
-      departmentName={userDept ? userDept.toUpperCase() : "OPERATIONS"}
+      departmentName={deptInfo.name}
       onRefresh={() => loadComplaints(true)}
       refreshing={refreshing}
       notificationCount={stats.awaitingVerification}
@@ -365,17 +370,27 @@ export default function DepartmentDashboard() {
       <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h2 className="text-2xl font-black text-white tracking-tight">Department Operations</h2>
-            <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
-              {userDept} Division
+            <h2 className="text-2xl font-black text-white tracking-tight">{deptInfo.name} Operations</h2>
+            <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${deptInfo.badgeClass}`}>
+              {deptInfo.shortName} Division
             </span>
           </div>
           <p className="text-sm text-slate-400 mt-1">
-            Monitor complaints, assign engineers and verify completed work.
+            {deptInfo.tagline}
           </p>
         </div>
 
         <div className="flex items-center gap-3">
+          <div className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-xl bg-[#0c1322] border border-white/10 text-xs">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isLive ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
+              <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isLive ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+            </span>
+            <span className="text-slate-300 font-medium">
+              {isLive ? "Live Realtime" : connectionStatus === "CONNECTING" ? "Connecting..." : "Live Synced"}
+            </span>
+          </div>
+
           <button
             onClick={() => loadComplaints(true)}
             disabled={refreshing}
@@ -956,12 +971,12 @@ export default function DepartmentDashboard() {
         onAssignClick={(c) => { setDetailComplaint(null); setAssignModalComplaint(c); }}
         onPriorityClick={(c) => { setDetailComplaint(null); setPriorityModalComplaint(c); }}
         onVerifyClick={(c) => { setDetailComplaint(null); setVerifyModalComplaint(c); }}
-        engineers={engineers}
+        engineers={engineersWithStats}
       />
 
       <AssignEngineerModal
         complaint={assignModalComplaint}
-        engineers={engineers}
+        engineers={engineersWithStats}
         isOpen={!!assignModalComplaint}
         onClose={() => setAssignModalComplaint(null)}
         onAssign={handleAssignEngineer}

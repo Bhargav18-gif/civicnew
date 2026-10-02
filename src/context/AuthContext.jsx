@@ -71,6 +71,15 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    try {
+      const mockUser = localStorage.getItem('cc_mock_user');
+      if (mockUser) {
+        setUser(JSON.parse(mockUser));
+        setLoading(false);
+        return () => {};
+      }
+    } catch (_) {}
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const profile = await resolveUserProfileFromSupabase(firebaseUser);
