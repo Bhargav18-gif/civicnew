@@ -14,7 +14,14 @@
     "deploy:hosting": "npm run build && npx firebase-tools deploy --only hosting",
     "deploy:functions": "npx firebase-tools deploy --only functions",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "playwright test",
+    "test:api": "playwright test tests/api/api.spec.js",
+    "test:security": "node tests/security/security-runner.js",
+    "test:load": "node tests/load/load-runner.js",
+    "test:performance": "node tests/performance/lighthouse.runner.js",
+    "test:ai": "node tests/ai/ai-runner.js",
+    "test:all": "node scripts/run-all-tests.js"
   },
   "dependencies": {
     "@emailjs/browser": "^4.4.1",
@@ -43,15 +50,18 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "^4.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "chrome-launcher": "^1.2.2",
     "concurrently": "^8.2.0",
     "eslint": "^9.15.0",
     "eslint-plugin-react": "^7.37.2",
     "eslint-plugin-react-hooks": "^5.0.0",
     "eslint-plugin-react-refresh": "^0.4.14",
+    "lighthouse": "^13.5.0",
     "pdfkit": "^0.20.2",
     "puppeteer": "^25.12.0",
     "tailwindcss": "^4.0.0",

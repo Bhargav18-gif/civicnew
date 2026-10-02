@@ -1,0 +1,84 @@
+# OWASP ZAP Automated Scan Configuration for CivicConnect
+# Baseline and Active Security Assessment
+
+env:
+  contexts:
+    - name: "CivicConnect-WebApp"
+      urls:
+        - "http://localhost:5173/"
+        - "http://localhost:5177/api"
+      includePaths:
+        - "http://localhost:5173/.*"
+        - "http://localhost:5177/api/.*"
+      excludePaths:
+        - "http://localhost:5173/assets/.*"
+      authentication:
+        method: "manual"
+  parameters:
+    failOnError: false
+    progressToStdout: true
+
+rules:
+  # Cross Site Scripting (XSS)
+  - id: 40012
+    name: "Reflected XSS"
+    threshold: "HIGH"
+  - id: 40014
+    name: "Persistent XSS"
+    threshold: "HIGH"
+  - id: 40016
+    name: "DOM XSS"
+    threshold: "HIGH"
+    
+  # SQL / NoSQL Injection
+  - id: 40018
+    name: "SQL Injection"
+    threshold: "HIGH"
+    
+  # Security Headers
+  - id: 10038
+    name: "Content Security Policy (CSP) Header Not Set"
+    threshold: "MEDIUM"
+  - id: 10020
+    name: "X-Frame-Options Header Not Set"
+    threshold: "MEDIUM"
+  - id: 10021
+    name: "X-Content-Type-Options Header Missing"
+    threshold: "LOW"
+    
+  # Information Leakage
+  - id: 10023
+    name: "Information Disclosure - Debug Error Messages"
+    threshold: "HIGH"
+  - id: 10055
+    name: "CSP: Insecure Nonce"
+    threshold: "MEDIUM"
+  - id: 10037
+    name: "Server Leaks Version Information via Server HTTP Response Header"
+    threshold: "LOW"
+    
+  # Access Control & Privilege Escalation
+  - id: 10107
+    name: "Httpoxy - Proxy Header Exposure"
+    threshold: "HIGH"
+  - id: 90022
+    name: "Application Error Disclosure"
+    threshold: "MEDIUM"
+
+jobs:
+  - type: spider
+    parameters:
+      maxDuration: 5
+      url: "http://localhost:5173"
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+  - type: activeScan
+    parameters:
+      maxDuration: 10
+      policy: "API-Minimal"
+  - type: report
+    parameters:
+      template: "traditional-html"
+      reportDir: "reports"
+      reportFile: "security-report.html"

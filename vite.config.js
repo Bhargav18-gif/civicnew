@@ -7,6 +7,12 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
+    hmr: {
+      overlay: false,
+    },
+    watch: {
+      ignored: ['**/reports/**', '**/test-results/**', '**/tests/**', '**/.git/**'],
+    },
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
     },

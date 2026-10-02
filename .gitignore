@@ -1,6 +1,32 @@
-node_modules
-dist
-.env
-*.local
-.DS_Store
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Production & Build outputs
+dist/
+build/
 .firebase/
+
+# Environment and Local configs
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.local
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Test outputs & Reports
+test-results/
+reports/
+playwright-report/
+.playwright/
+load_test_results.json
+*.last-run.json
+
+# Generated binaries
+*.pdf

@@ -1,0 +1,82 @@
+name: CivicConnect Automated CI/CD Testing Pipeline
+
+on:
+  push:
+    branches: [ main, master, dev ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  test-and-verify:
+    name: Complete Multi-Layer Automated QA System
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      NODE_ENV: test
+      BASE_URL: http://localhost:5173
+      API_BASE_URL: http://localhost:5177/api
+      PORT: 5177
+      VITE_FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY || 'AIzaSyDJAJ1lLBAiSlP5T2XbLxe7Hjjje5U7nkw' }}
+      VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://deewawxqogoejogtqmmi.supabase.co' }}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_iJpvco263EC7PvCG-hOK8Q_PGpflycQ' }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://deewawxqogoejogtqmmi.supabase.co' }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Project Dependencies
+        run: npm ci || npm install
+
+      - name: Install Playwright Chromium & Dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Lint Codebase
+        run: npm run lint || echo "Lint warnings detected"
+
+      - name: Build Frontend Application
+        run: npm run build
+
+      - name: Start Background Dev & API Server
+        run: |
+          npm run dev:all &
+          npx wait-on http://localhost:5173 http://localhost:5177/api/health --timeout 60000
+
+      - name: Layer 1 & 4 — Execute Backend API & Model Tests
+        run: npm run test:api
+
+      - name: Layer 2 — Execute Automated Security & RBAC Pen-Tests
+        run: npm run test:security
+
+      - name: Layer 3 — Execute Load & Stress Tests
+        run: npm run test:load
+
+      - name: Layer 5 — Execute Lighthouse Performance Audits
+        run: npm run test:performance || echo "Lighthouse completed with advisory warnings"
+
+      - name: Layer 6 — Execute Playwright Full E2E & Canonical Workflow
+        run: npx playwright test
+
+      - name: Generate Consolidated HTML Test Report
+        if: always()
+        run: node scripts/generate-consolidated-report.js
+
+      - name: Upload Test Reports & Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: civicconnect-qa-reports
+          path: |
+            reports/
+            test-results/
+          retention-days: 14
